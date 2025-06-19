@@ -1,0 +1,66 @@
+[package]
+name = "bacnet-rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Tom van Hest <tomvanhest@pm.me>"]
+description = "A complete BACnet protocol stack implementation in Rust"
+documentation = "https://docs.rs/bacnet-rs"
+homepage = "https://github.com/Heliopshan/bacnet-rs"
+repository = "https://github.com/Heliopshan/bacnet-rs"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["bacnet", "building-automation", "protocol", "networking", "iot"]
+categories = ["network-programming", "embedded", "no-std::no-alloc"]
+
+[dependencies]
+# Core dependencies
+tokio = { version = "1.40", features = ["full"], optional = true }
+bytes = "1.7"
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"], optional = true }
+bincode = "1.3"
+
+# Networking
+socket2 = "0.5"
+if-addrs = "0.13"
+
+# Logging
+log = "0.4"
+env_logger = { version = "0.11", optional = true }
+
+# Time handling
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+# CRC calculations
+crc = "3.2"
+
+# Optional async runtime
+async-trait = { version = "0.1", optional = true }
+
+[dev-dependencies]
+criterion = "0.5"
+proptest = "1.5"
+tokio-test = "0.4"
+
+[features]
+default = ["std", "async", "serde"]
+std = ["chrono/std"]
+async = ["tokio", "async-trait"]
+no-std = []
+
+[[example]]
+name = "simple_device"
+required-features = ["std"]
+
+[[example]]
+name = "advanced_device"
+required-features = ["std"]
+
+[[bench]]
+name = "encoding"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
