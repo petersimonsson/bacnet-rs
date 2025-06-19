@@ -951,6 +951,797 @@ pub mod advanced {
     }
 }
 
+/// Encoding stream for efficient multi-value encoding
+pub struct EncodingStream {
+    buffer: Vec<u8>,
+    position: usize,
+    max_size: usize,
+}
+
+impl EncodingStream {
+    /// Create a new encoding stream
+    pub fn new(max_size: usize) -> Self {
+        Self {
+            buffer: Vec::with_capacity(max_size),
+            position: 0,
+            max_size,
+        }
+    }
+
+    /// Encode an application tagged value
+    pub fn encode_tagged<T: EncodableValue>(&mut self, tag: ApplicationTag, value: T) -> Result<()> {
+        if self.buffer.len() >= self.max_size {
+            return Err(EncodingError::BufferOverflow);
+        }
+        value.encode_to(tag, &mut self.buffer)
+    }
+
+    /// Encode a context tagged value
+    pub fn encode_context<T: EncodableValue>(&mut self, tag_number: u8, value: T) -> Result<()> {
+        if self.buffer.len() >= self.max_size {
+            return Err(EncodingError::BufferOverflow);
+        }
+        value.encode_context_to(tag_number, &mut self.buffer)
+    }
+
+    /// Get the encoded data
+    pub fn data(&self) -> &[u8] {
+        &self.buffer
+    }
+
+    /// Take the buffer
+    pub fn into_buffer(self) -> Vec<u8> {
+        self.buffer
+    }
+
+    /// Clear the stream
+    pub fn clear(&mut self) {
+        self.buffer.clear();
+        self.position = 0;
+    }
+}
+
+/// Trait for values that can be encoded
+pub trait EncodableValue {
+    /// Encode with application tag
+    fn encode_to(&self, tag: ApplicationTag, buffer: &mut Vec<u8>) -> Result<()>;
+    
+    /// Encode with context tag
+    fn encode_context_to(&self, tag_number: u8, buffer: &mut Vec<u8>) -> Result<()>;
+}
+
+impl EncodableValue for bool {
+    fn encode_to(&self, _tag: ApplicationTag, buffer: &mut Vec<u8>) -> Result<()> {
+        encode_boolean(buffer, *self)
+    }
+    
+    fn encode_context_to(&self, tag_number: u8, buffer: &mut Vec<u8>) -> Result<()> {
+        advanced::context::encode_context_tag(buffer, tag_number, if *self { 1 } else { 0 })
+    }
+}
+
+impl EncodableValue for u32 {
+    fn encode_to(&self, _tag: ApplicationTag, buffer: &mut Vec<u8>) -> Result<()> {
+        encode_unsigned(buffer, *self)
+    }
+    
+    fn encode_context_to(&self, tag_number: u8, buffer: &mut Vec<u8>) -> Result<()> {
+        let temp_buffer = Vec::new();
+        let mut temp = temp_buffer;
+        encode_unsigned(&mut temp, *self)?;
+        advanced::context::encode_context_tag(buffer, tag_number, temp.len() - 1)?;
+        buffer.extend_from_slice(&temp[1..]);
+        Ok(())
+    }
+}
+
+impl EncodableValue for i32 {
+    fn encode_to(&self, _tag: ApplicationTag, buffer: &mut Vec<u8>) -> Result<()> {
+        encode_signed(buffer, *self)
+    }
+    
+    fn encode_context_to(&self, tag_number: u8, buffer: &mut Vec<u8>) -> Result<()> {
+        let temp_buffer = Vec::new();
+        let mut temp = temp_buffer;
+        encode_signed(&mut temp, *self)?;
+        advanced::context::encode_context_tag(buffer, tag_number, temp.len() - 1)?;
+        buffer.extend_from_slice(&temp[1..]);
+        Ok(())
+    }
+}
+
+impl EncodableValue for f32 {
+    fn encode_to(&self, _tag: ApplicationTag, buffer: &mut Vec<u8>) -> Result<()> {
+        encode_real(buffer, *self)
+    }
+    
+    fn encode_context_to(&self, tag_number: u8, buffer: &mut Vec<u8>) -> Result<()> {
+        advanced::context::encode_context_tag(buffer, tag_number, 4)?;
+        buffer.extend_from_slice(&self.to_be_bytes());
+        Ok(())
+    }
+}
+
+impl EncodableValue for f64 {
+    fn encode_to(&self, _tag: ApplicationTag, buffer: &mut Vec<u8>) -> Result<()> {
+        encode_double(buffer, *self)
+    }
+    
+    fn encode_context_to(&self, tag_number: u8, buffer: &mut Vec<u8>) -> Result<()> {
+        advanced::context::encode_context_tag(buffer, tag_number, 8)?;
+        buffer.extend_from_slice(&self.to_be_bytes());
+        Ok(())
+    }
+}
+
+impl EncodableValue for &str {
+    fn encode_to(&self, _tag: ApplicationTag, buffer: &mut Vec<u8>) -> Result<()> {
+        encode_character_string(buffer, self)
+    }
+    
+    fn encode_context_to(&self, tag_number: u8, buffer: &mut Vec<u8>) -> Result<()> {
+        advanced::context::encode_context_tag(buffer, tag_number, self.len() + 1)?;
+        buffer.push(0); // Character set
+        buffer.extend_from_slice(self.as_bytes());
+        Ok(())
+    }
+}
+
+/// Decoding stream for efficient multi-value decoding
+pub struct DecodingStream<'a> {
+    data: &'a [u8],
+    position: usize,
+}
+
+impl<'a> DecodingStream<'a> {
+    /// Create a new decoding stream
+    pub fn new(data: &'a [u8]) -> Self {
+        Self {
+            data,
+            position: 0,
+        }
+    }
+
+    /// Check if stream has more data
+    pub fn has_data(&self) -> bool {
+        self.position < self.data.len()
+    }
+
+    /// Get remaining bytes
+    pub fn remaining(&self) -> usize {
+        self.data.len().saturating_sub(self.position)
+    }
+
+    /// Peek at the next tag without consuming
+    pub fn peek_tag(&self) -> Result<ApplicationTag> {
+        if self.position >= self.data.len() {
+            return Err(EncodingError::UnexpectedEndOfData);
+        }
+        
+        let tag_byte = self.data[self.position];
+        let tag = ApplicationTag::try_from(tag_byte >> 4)?;
+        Ok(tag)
+    }
+
+    /// Decode a boolean
+    pub fn decode_boolean(&mut self) -> Result<bool> {
+        let (value, consumed) = decode_boolean(&self.data[self.position..])?;
+        self.position += consumed;
+        Ok(value)
+    }
+
+    /// Decode an unsigned integer
+    pub fn decode_unsigned(&mut self) -> Result<u32> {
+        let (value, consumed) = decode_unsigned(&self.data[self.position..])?;
+        self.position += consumed;
+        Ok(value)
+    }
+
+    /// Decode a signed integer
+    pub fn decode_signed(&mut self) -> Result<i32> {
+        let (value, consumed) = decode_signed(&self.data[self.position..])?;
+        self.position += consumed;
+        Ok(value)
+    }
+
+    /// Decode a real number
+    pub fn decode_real(&mut self) -> Result<f32> {
+        let (value, consumed) = decode_real(&self.data[self.position..])?;
+        self.position += consumed;
+        Ok(value)
+    }
+
+    /// Decode a double
+    pub fn decode_double(&mut self) -> Result<f64> {
+        let (value, consumed) = decode_double(&self.data[self.position..])?;
+        self.position += consumed;
+        Ok(value)
+    }
+
+    /// Decode a character string
+    pub fn decode_character_string(&mut self) -> Result<String> {
+        let (value, consumed) = decode_character_string(&self.data[self.position..])?;
+        self.position += consumed;
+        Ok(value)
+    }
+
+    /// Decode an octet string
+    pub fn decode_octet_string(&mut self) -> Result<Vec<u8>> {
+        let (value, consumed) = decode_octet_string(&self.data[self.position..])?;
+        self.position += consumed;
+        Ok(value)
+    }
+
+    /// Decode an enumerated value
+    pub fn decode_enumerated(&mut self) -> Result<u32> {
+        let (value, consumed) = decode_enumerated(&self.data[self.position..])?;
+        self.position += consumed;
+        Ok(value)
+    }
+
+    /// Decode a date
+    pub fn decode_date(&mut self) -> Result<(u16, u8, u8, u8)> {
+        let (value, consumed) = decode_date(&self.data[self.position..])?;
+        self.position += consumed;
+        Ok(value)
+    }
+
+    /// Decode a time
+    pub fn decode_time(&mut self) -> Result<(u8, u8, u8, u8)> {
+        let (value, consumed) = decode_time(&self.data[self.position..])?;
+        self.position += consumed;
+        Ok(value)
+    }
+
+    /// Decode an object identifier
+    pub fn decode_object_identifier(&mut self) -> Result<(u16, u32)> {
+        let (value, consumed) = decode_object_identifier(&self.data[self.position..])?;
+        self.position += consumed;
+        Ok(value)
+    }
+
+    /// Skip a value
+    pub fn skip_value(&mut self) -> Result<()> {
+        let (tag, length, consumed) = decode_application_tag(&self.data[self.position..])?;
+        self.position += consumed + length;
+        Ok(())
+    }
+
+    /// Get current position
+    pub fn position(&self) -> usize {
+        self.position
+    }
+
+    /// Set position
+    pub fn set_position(&mut self, position: usize) -> Result<()> {
+        if position > self.data.len() {
+            return Err(EncodingError::ValueOutOfRange);
+        }
+        self.position = position;
+        Ok(())
+    }
+}
+
+/// Property array encoder
+pub struct PropertyArrayEncoder {
+    buffer: Vec<u8>,
+    count: usize,
+}
+
+impl PropertyArrayEncoder {
+    /// Create a new property array encoder
+    pub fn new() -> Self {
+        Self {
+            buffer: Vec::new(),
+            count: 0,
+        }
+    }
+
+    /// Add a property value
+    pub fn add_property<T: EncodableValue>(&mut self, property_id: u32, value: T) -> Result<()> {
+        // Encode property identifier with context tag 0
+        advanced::context::encode_context_tag(&mut self.buffer, 0, 4)?;
+        self.buffer.extend_from_slice(&property_id.to_be_bytes());
+        
+        // Open context tag 1 for value
+        advanced::context::encode_opening_tag(&mut self.buffer, 1)?;
+        
+        // Encode the value
+        value.encode_to(ApplicationTag::Null, &mut self.buffer)?;
+        
+        // Close context tag 1
+        advanced::context::encode_closing_tag(&mut self.buffer, 1)?;
+        
+        self.count += 1;
+        Ok(())
+    }
+
+    /// Get the encoded data
+    pub fn data(&self) -> &[u8] {
+        &self.buffer
+    }
+
+    /// Get the property count
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    /// Clear the encoder
+    pub fn clear(&mut self) {
+        self.buffer.clear();
+        self.count = 0;
+    }
+}
+
+/// Error encoder for BACnet error PDUs
+pub struct ErrorEncoder {
+    buffer: Vec<u8>,
+}
+
+impl ErrorEncoder {
+    /// Create a new error encoder
+    pub fn new() -> Self {
+        Self {
+            buffer: Vec::new(),
+        }
+    }
+
+    /// Encode an error class and code
+    pub fn encode_error(&mut self, error_class: u32, error_code: u32) -> Result<()> {
+        // Error class with context tag 0
+        advanced::context::encode_context_tag(&mut self.buffer, 0, 
+            if error_class <= 0xFF { 1 } else if error_class <= 0xFFFF { 2 } else { 4 })?;
+        encode_enumerated(&mut self.buffer, error_class)?;
+        
+        // Error code with context tag 1
+        advanced::context::encode_context_tag(&mut self.buffer, 1,
+            if error_code <= 0xFF { 1 } else if error_code <= 0xFFFF { 2 } else { 4 })?;
+        encode_enumerated(&mut self.buffer, error_code)?;
+        
+        Ok(())
+    }
+
+    /// Get the encoded data
+    pub fn data(&self) -> &[u8] {
+        &self.buffer
+    }
+
+    /// Clear the encoder
+    pub fn clear(&mut self) {
+        self.buffer.clear();
+    }
+}
+
+/// Encoding performance analyzer
+#[derive(Debug, Default)]
+pub struct EncodingAnalyzer {
+    /// Encoding operation statistics
+    pub stats: EncodingStatistics,
+    /// Performance benchmarks
+    benchmarks: Vec<EncodingBenchmark>,
+    /// Error patterns
+    error_patterns: Vec<ErrorPattern>,
+}
+
+/// Encoding operation statistics
+#[derive(Debug, Default)]
+pub struct EncodingStatistics {
+    /// Total encoding operations
+    pub total_encodings: u64,
+    /// Total decoding operations
+    pub total_decodings: u64,
+    /// Total bytes encoded
+    pub bytes_encoded: u64,
+    /// Total bytes decoded
+    pub bytes_decoded: u64,
+    /// Encoding errors
+    pub encoding_errors: u64,
+    /// Decoding errors
+    pub decoding_errors: u64,
+    /// Average encoding time (microseconds)
+    pub avg_encode_time_us: f64,
+    /// Average decoding time (microseconds)
+    pub avg_decode_time_us: f64,
+}
+
+/// Performance benchmark data
+#[derive(Debug, Clone)]
+struct EncodingBenchmark {
+    /// Data type being benchmarked
+    data_type: &'static str,
+    /// Data size in bytes
+    size: usize,
+    /// Encoding time in microseconds
+    encode_time_us: u64,
+    /// Decoding time in microseconds
+    decode_time_us: u64,
+    /// Timestamp
+    #[cfg(feature = "std")]
+    timestamp: std::time::Instant,
+}
+
+/// Error pattern tracking
+#[derive(Debug, Clone)]
+struct ErrorPattern {
+    /// Error type
+    error_type: EncodingError,
+    /// Frequency count
+    count: u32,
+    /// Last occurrence
+    #[cfg(feature = "std")]
+    last_seen: std::time::Instant,
+}
+
+impl EncodingAnalyzer {
+    /// Create a new encoding analyzer
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record an encoding operation
+    pub fn record_encoding(&mut self, data_type: &'static str, bytes: usize, duration_us: u64) {
+        self.stats.total_encodings += 1;
+        self.stats.bytes_encoded += bytes as u64;
+        
+        // Update average encoding time
+        let total_time = self.stats.avg_encode_time_us * (self.stats.total_encodings - 1) as f64;
+        self.stats.avg_encode_time_us = (total_time + duration_us as f64) / self.stats.total_encodings as f64;
+
+        // Store benchmark data
+        self.benchmarks.push(EncodingBenchmark {
+            data_type,
+            size: bytes,
+            encode_time_us: duration_us,
+            decode_time_us: 0,
+            #[cfg(feature = "std")]
+            timestamp: std::time::Instant::now(),
+        });
+
+        // Keep only recent benchmarks (last 1000)
+        if self.benchmarks.len() > 1000 {
+            self.benchmarks.remove(0);
+        }
+    }
+
+    /// Record a decoding operation
+    pub fn record_decoding(&mut self, data_type: &'static str, bytes: usize, duration_us: u64) {
+        self.stats.total_decodings += 1;
+        self.stats.bytes_decoded += bytes as u64;
+        
+        // Update average decoding time
+        let total_time = self.stats.avg_decode_time_us * (self.stats.total_decodings - 1) as f64;
+        self.stats.avg_decode_time_us = (total_time + duration_us as f64) / self.stats.total_decodings as f64;
+    }
+
+    /// Record an encoding error
+    pub fn record_error(&mut self, error: EncodingError) {
+        self.stats.encoding_errors += 1;
+        
+        // Update error pattern
+        if let Some(pattern) = self.error_patterns.iter_mut().find(|p| 
+            std::mem::discriminant(&p.error_type) == std::mem::discriminant(&error)) {
+            pattern.count += 1;
+            #[cfg(feature = "std")]
+            {
+                pattern.last_seen = std::time::Instant::now();
+            }
+        } else {
+            self.error_patterns.push(ErrorPattern {
+                error_type: error,
+                count: 1,
+                #[cfg(feature = "std")]
+                last_seen: std::time::Instant::now(),
+            });
+        }
+    }
+
+    /// Get encoding throughput (bytes per second)
+    pub fn get_encoding_throughput(&self) -> f64 {
+        if self.stats.avg_encode_time_us > 0.0 {
+            (self.stats.bytes_encoded as f64 / self.stats.total_encodings as f64) / 
+            (self.stats.avg_encode_time_us / 1_000_000.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Get decoding throughput (bytes per second)
+    pub fn get_decoding_throughput(&self) -> f64 {
+        if self.stats.avg_decode_time_us > 0.0 {
+            (self.stats.bytes_decoded as f64 / self.stats.total_decodings as f64) / 
+            (self.stats.avg_decode_time_us / 1_000_000.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Get most common errors
+    pub fn get_top_errors(&self, limit: usize) -> Vec<(&EncodingError, u32)> {
+        let mut errors: Vec<_> = self.error_patterns.iter()
+            .map(|p| (&p.error_type, p.count))
+            .collect();
+        errors.sort_by(|a, b| b.1.cmp(&a.1));
+        errors.truncate(limit);
+        errors
+    }
+
+    /// Reset statistics
+    pub fn reset(&mut self) {
+        self.stats = EncodingStatistics::default();
+        self.benchmarks.clear();
+        self.error_patterns.clear();
+    }
+}
+
+/// Encoding cache for frequently used values
+#[derive(Debug)]
+pub struct EncodingCache {
+    /// Cached encoded values
+    cache: Vec<CacheEntry>,
+    /// Maximum cache size
+    max_size: usize,
+    /// Cache hit statistics
+    pub hits: u64,
+    /// Cache miss statistics
+    pub misses: u64,
+}
+
+/// Cache entry
+#[derive(Debug, Clone)]
+struct CacheEntry {
+    /// Hash of the original value
+    hash: u64,
+    /// Encoded data
+    encoded: Vec<u8>,
+    /// Access count
+    access_count: u32,
+    /// Last access time
+    #[cfg(feature = "std")]
+    last_access: std::time::Instant,
+}
+
+impl EncodingCache {
+    /// Create a new encoding cache
+    pub fn new(max_size: usize) -> Self {
+        Self {
+            cache: Vec::with_capacity(max_size),
+            max_size,
+            hits: 0,
+            misses: 0,
+        }
+    }
+
+    /// Get cached encoding if available
+    pub fn get(&mut self, hash: u64) -> Option<Vec<u8>> {
+        if let Some(entry) = self.cache.iter_mut().find(|e| e.hash == hash) {
+            entry.access_count += 1;
+            #[cfg(feature = "std")]
+            {
+                entry.last_access = std::time::Instant::now();
+            }
+            self.hits += 1;
+            Some(entry.encoded.clone())
+        } else {
+            self.misses += 1;
+            None
+        }
+    }
+
+    /// Store encoded value in cache
+    pub fn put(&mut self, hash: u64, encoded: Vec<u8>) {
+        // Check if already exists
+        if self.cache.iter().any(|e| e.hash == hash) {
+            return;
+        }
+
+        // Remove least recently used if cache is full
+        if self.cache.len() >= self.max_size {
+            self.cache.sort_by_key(|e| e.access_count);
+            self.cache.remove(0);
+        }
+
+        self.cache.push(CacheEntry {
+            hash,
+            encoded,
+            access_count: 1,
+            #[cfg(feature = "std")]
+            last_access: std::time::Instant::now(),
+        });
+    }
+
+    /// Clear the cache
+    pub fn clear(&mut self) {
+        self.cache.clear();
+        self.hits = 0;
+        self.misses = 0;
+    }
+
+    /// Get cache hit ratio
+    pub fn hit_ratio(&self) -> f64 {
+        let total = self.hits + self.misses;
+        if total > 0 {
+            self.hits as f64 / total as f64
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Encoding configuration manager
+#[derive(Debug, Clone)]
+pub struct EncodingConfig {
+    /// Use compression for large data
+    pub use_compression: bool,
+    /// Compression threshold (bytes)
+    pub compression_threshold: usize,
+    /// Enable caching
+    pub enable_caching: bool,
+    /// Cache size
+    pub cache_size: usize,
+    /// Enable performance tracking
+    pub enable_performance_tracking: bool,
+    /// Validation level
+    pub validation_level: ValidationLevel,
+    /// Maximum string length
+    pub max_string_length: usize,
+    /// Maximum array size
+    pub max_array_size: usize,
+}
+
+/// Validation levels
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidationLevel {
+    /// No validation
+    None,
+    /// Basic validation
+    Basic,
+    /// Strict validation
+    Strict,
+    /// Paranoid validation (slowest)
+    Paranoid,
+}
+
+impl Default for EncodingConfig {
+    fn default() -> Self {
+        Self {
+            use_compression: false,
+            compression_threshold: 1024,
+            enable_caching: true,
+            cache_size: 1000,
+            enable_performance_tracking: true,
+            validation_level: ValidationLevel::Basic,
+            max_string_length: 4096,
+            max_array_size: 1000,
+        }
+    }
+}
+
+/// High-level encoding manager
+#[derive(Debug)]
+pub struct EncodingManager {
+    /// Configuration
+    config: EncodingConfig,
+    /// Performance analyzer
+    analyzer: Option<EncodingAnalyzer>,
+    /// Encoding cache
+    cache: Option<EncodingCache>,
+    /// Buffer manager
+    buffer_manager: advanced::BufferManager,
+}
+
+impl EncodingManager {
+    /// Create a new encoding manager
+    pub fn new(config: EncodingConfig) -> Self {
+        let analyzer = if config.enable_performance_tracking {
+            Some(EncodingAnalyzer::new())
+        } else {
+            None
+        };
+
+        let cache = if config.enable_caching {
+            Some(EncodingCache::new(config.cache_size))
+        } else {
+            None
+        };
+
+        Self {
+            config,
+            analyzer,
+            cache,
+            buffer_manager: advanced::BufferManager::new(8192),
+        }
+    }
+
+    /// Encode a value with full management features
+    pub fn encode<T: EncodableValue>(&mut self, value: T, tag: ApplicationTag) -> Result<Vec<u8>> {
+        #[cfg(feature = "std")]
+        let start_time = std::time::Instant::now();
+
+        let mut buffer = self.buffer_manager.get_encode_buffer();
+        let result = value.encode_to(tag, &mut buffer);
+
+        #[cfg(feature = "std")]
+        let duration = start_time.elapsed();
+
+        match result {
+            Ok(_) => {
+                if let Some(ref mut analyzer) = self.analyzer {
+                    #[cfg(feature = "std")]
+                    analyzer.record_encoding("generic", buffer.len(), duration.as_micros() as u64);
+                    #[cfg(not(feature = "std"))]
+                    analyzer.record_encoding("generic", buffer.len(), 0);
+                }
+
+                let result_buffer = buffer.clone();
+                self.buffer_manager.return_buffer(buffer);
+                Ok(result_buffer)
+            }
+            Err(e) => {
+                if let Some(ref mut analyzer) = self.analyzer {
+                    analyzer.record_error(e.clone());
+                }
+                self.buffer_manager.return_buffer(buffer);
+                Err(e)
+            }
+        }
+    }
+
+    /// Decode a value with full management features
+    pub fn decode<T>(&mut self, data: &[u8], decoder: impl Fn(&[u8]) -> Result<(T, usize)>) -> Result<T> {
+        #[cfg(feature = "std")]
+        let start_time = std::time::Instant::now();
+
+        let result = decoder(data);
+
+        #[cfg(feature = "std")]
+        let duration = start_time.elapsed();
+
+        match result {
+            Ok((value, consumed)) => {
+                if let Some(ref mut analyzer) = self.analyzer {
+                    #[cfg(feature = "std")]
+                    analyzer.record_decoding("generic", consumed, duration.as_micros() as u64);
+                    #[cfg(not(feature = "std"))]
+                    analyzer.record_decoding("generic", consumed, 0);
+                }
+                Ok(value)
+            }
+            Err(e) => {
+                if let Some(ref mut analyzer) = self.analyzer {
+                    analyzer.record_error(e.clone());
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Get performance statistics
+    pub fn get_stats(&self) -> Option<&EncodingStatistics> {
+        self.analyzer.as_ref().map(|a| &a.stats)
+    }
+
+    /// Get cache statistics
+    pub fn get_cache_stats(&self) -> Option<(u64, u64, f64)> {
+        self.cache.as_ref().map(|c| (c.hits, c.misses, c.hit_ratio()))
+    }
+
+    /// Reset all statistics
+    pub fn reset_stats(&mut self) {
+        if let Some(ref mut analyzer) = self.analyzer {
+            analyzer.reset();
+        }
+        if let Some(ref mut cache) = self.cache {
+            cache.clear();
+        }
+    }
+}
+
+impl Default for EncodingManager {
+    fn default() -> Self {
+        Self::new(EncodingConfig::default())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

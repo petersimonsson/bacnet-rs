@@ -52,6 +52,9 @@ use alloc::{string::String, vec::Vec};
 #[cfg(not(feature = "std"))]
 use core::time::Duration;
 
+use crate::service::{ConfirmedServiceChoice, UnconfirmedServiceChoice, RejectReason, AbortReason};
+use crate::object::Segmentation;
+
 /// Result type for application layer operations
 #[cfg(feature = "std")]
 pub type Result<T> = std::result::Result<T, ApplicationError>;
@@ -1049,6 +1052,569 @@ impl SegmentationManager {
 impl Default for SegmentationManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Application layer service handler
+#[derive(Debug)]
+pub struct ApplicationLayerHandler {
+    /// Device instance for this application
+    device_instance: u32,
+    /// Supported services
+    supported_services: SupportedServices,
+    /// Transaction manager
+    transaction_manager: TransactionManager,
+    /// Service processors
+    service_processors: ServiceProcessors,
+    /// Application statistics
+    pub stats: ApplicationStatistics,
+}
+
+/// Supported services configuration
+#[derive(Debug, Clone)]
+pub struct SupportedServices {
+    /// Confirmed services
+    pub confirmed: Vec<ConfirmedServiceChoice>,
+    /// Unconfirmed services
+    pub unconfirmed: Vec<UnconfirmedServiceChoice>,
+}
+
+impl Default for SupportedServices {
+    fn default() -> Self {
+        use crate::service::{ConfirmedServiceChoice, UnconfirmedServiceChoice};
+        
+        Self {
+            confirmed: vec![
+                ConfirmedServiceChoice::ReadProperty,
+                ConfirmedServiceChoice::WriteProperty,
+                ConfirmedServiceChoice::ReadPropertyMultiple,
+                ConfirmedServiceChoice::SubscribeCOV,
+            ],
+            unconfirmed: vec![
+                UnconfirmedServiceChoice::WhoIs,
+                UnconfirmedServiceChoice::IAm,
+                UnconfirmedServiceChoice::UnconfirmedEventNotification,
+            ],
+        }
+    }
+}
+
+/// Service processors for handling different service types
+#[derive(Default)]
+struct ServiceProcessors {
+    /// Read property processor
+    read_property: Option<Box<dyn Fn(&[u8]) -> Result<Vec<u8>> + Send + Sync>>,
+    /// Write property processor
+    write_property: Option<Box<dyn Fn(&[u8]) -> Result<Vec<u8>> + Send + Sync>>,
+    /// Who-Is processor
+    who_is: Option<Box<dyn Fn(&[u8]) -> Result<Option<Vec<u8>>> + Send + Sync>>,
+}
+
+impl fmt::Debug for ServiceProcessors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ServiceProcessors")
+            .field("read_property", &self.read_property.is_some())
+            .field("write_property", &self.write_property.is_some())
+            .field("who_is", &self.who_is.is_some())
+            .finish()
+    }
+}
+
+impl ApplicationLayerHandler {
+    /// Create a new application layer handler
+    pub fn new(device_instance: u32) -> Self {
+        Self {
+            device_instance,
+            supported_services: SupportedServices::default(),
+            transaction_manager: TransactionManager::new(),
+            service_processors: ServiceProcessors::default(),
+            stats: ApplicationStatistics::default(),
+        }
+    }
+
+    /// Process an incoming APDU
+    pub fn process_apdu(&mut self, apdu: &Apdu, source: &[u8]) -> Result<Option<Apdu>> {
+        self.stats.apdus_received += 1;
+
+        match apdu {
+            Apdu::ConfirmedRequest { segmented, more_follows, segmented_response_accepted, 
+                                   max_segments, max_response_size, invoke_id, sequence_number, 
+                                   proposed_window_size, service_choice, service_data } => {
+                let pdu_flags = PduFlags {
+                    segmented: *segmented,
+                    more_follows: *more_follows,
+                    segmented_response_accepted: *segmented_response_accepted,
+                };
+                self.process_confirmed_request(pdu_flags, *invoke_id, *service_choice, service_data)
+            }
+            Apdu::UnconfirmedRequest { service_choice, service_data } => {
+                self.process_unconfirmed_request(*service_choice, service_data)
+            }
+            Apdu::SimpleAck { invoke_id, service_choice } => {
+                self.process_simple_ack(*invoke_id, *service_choice)
+            }
+            Apdu::ComplexAck { segmented, more_follows, invoke_id, sequence_number, 
+                             proposed_window_size, service_choice, service_data } => {
+                let pdu_flags = PduFlags {
+                    segmented: *segmented,
+                    more_follows: *more_follows,
+                    segmented_response_accepted: false,
+                };
+                self.process_complex_ack(pdu_flags, *invoke_id, *service_choice, service_data)
+            }
+            Apdu::Error { invoke_id, service_choice, error_class, error_code } => {
+                self.process_error(*invoke_id, *service_choice, *error_class, *error_code)
+            }
+            Apdu::Reject { invoke_id, reject_reason } => {
+                self.process_reject(*invoke_id, *reject_reason)
+            }
+            Apdu::Abort { server, invoke_id, abort_reason } => {
+                self.process_abort(*server, *invoke_id, *abort_reason)
+            }
+            _ => {
+                self.stats.unknown_apdus += 1;
+                Err(ApplicationError::UnsupportedApduType)
+            }
+        }
+    }
+
+    /// Process a confirmed request
+    fn process_confirmed_request(
+        &mut self,
+        pdu_flags: PduFlags,
+        invoke_id: u8,
+        service_choice: u8,
+        service_data: &[u8],
+    ) -> Result<Option<Apdu>> {
+        self.stats.confirmed_requests += 1;
+
+        // Check if service is supported
+        use crate::service::ConfirmedServiceChoice;
+        let service = match service_choice {
+            6 => ConfirmedServiceChoice::AtomicReadFile,
+            7 => ConfirmedServiceChoice::AtomicWriteFile,
+            12 => ConfirmedServiceChoice::ReadProperty,
+            15 => ConfirmedServiceChoice::WriteProperty,
+            14 => ConfirmedServiceChoice::ReadPropertyMultiple,
+            5 => ConfirmedServiceChoice::SubscribeCOV,
+            _ => {
+                return Ok(Some(Apdu::Reject {
+                    invoke_id,
+                    reject_reason: RejectReason::UnrecognizedService as u8,
+                }));
+            }
+        };
+
+        if !self.supported_services.confirmed.contains(&service) {
+            return Ok(Some(Apdu::Reject {
+                invoke_id,
+                reject_reason: RejectReason::UnrecognizedService as u8,
+            }));
+        }
+
+        // Process based on service type
+        match service {
+            ConfirmedServiceChoice::ReadProperty => {
+                if let Some(ref processor) = self.service_processors.read_property {
+                    match processor(service_data) {
+                        Ok(response_data) => {
+                            Ok(Some(Apdu::ComplexAck {
+                                segmented: false,
+                                more_follows: false,
+                                invoke_id,
+                                sequence_number: None,
+                                proposed_window_size: None,
+                                service_choice,
+                                service_data: response_data,
+                            }))
+                        }
+                        Err(_) => {
+                            Ok(Some(Apdu::Error {
+                                invoke_id,
+                                service_choice,
+                                error_class: 0, // Object
+                                error_code: 0,  // Unknown object
+                            }))
+                        }
+                    }
+                } else {
+                    Ok(Some(Apdu::Abort {
+                        server: true,
+                        invoke_id,
+                        abort_reason: AbortReason::Other as u8,
+                    }))
+                }
+            }
+            _ => {
+                Ok(Some(Apdu::Reject {
+                    invoke_id,
+                    reject_reason: RejectReason::UnrecognizedService as u8,
+                }))
+            }
+        }
+    }
+
+    /// Process an unconfirmed request
+    fn process_unconfirmed_request(
+        &mut self,
+        service_choice: u8,
+        service_data: &[u8],
+    ) -> Result<Option<Apdu>> {
+        self.stats.unconfirmed_requests += 1;
+
+        // Unconfirmed requests don't get responses unless it's I-Am for Who-Is
+        use crate::service::UnconfirmedServiceChoice;
+        let service = match service_choice {
+            0 => UnconfirmedServiceChoice::IAm,
+            1 => UnconfirmedServiceChoice::IHave,
+            2 => UnconfirmedServiceChoice::UnconfirmedEventNotification,
+            3 => UnconfirmedServiceChoice::UnconfirmedEventNotification,
+            4 => UnconfirmedServiceChoice::UnconfirmedPrivateTransfer,
+            5 => UnconfirmedServiceChoice::UnconfirmedTextMessage,
+            6 => UnconfirmedServiceChoice::TimeSynchronization,
+            7 => UnconfirmedServiceChoice::WhoHas,
+            8 => UnconfirmedServiceChoice::WhoIs,
+            9 => UnconfirmedServiceChoice::UtcTimeSynchronization,
+            _ => return Ok(None),
+        };
+
+        match service {
+            UnconfirmedServiceChoice::WhoIs => {
+                if let Some(ref processor) = self.service_processors.who_is {
+                    if let Ok(Some(response_data)) = processor(service_data) {
+                        return Ok(Some(Apdu::UnconfirmedRequest {
+                            service_choice: UnconfirmedServiceChoice::IAm as u8,
+                            service_data: response_data,
+                        }));
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        Ok(None)
+    }
+
+    /// Process a simple ACK
+    fn process_simple_ack(&mut self, invoke_id: u8, service_choice: u8) -> Result<Option<Apdu>> {
+        self.stats.simple_acks += 1;
+        self.transaction_manager.complete_transaction(invoke_id);
+        Ok(None)
+    }
+
+    /// Process a complex ACK
+    fn process_complex_ack(
+        &mut self,
+        pdu_flags: PduFlags,
+        invoke_id: u8,
+        service_choice: u8,
+        service_data: &[u8],
+    ) -> Result<Option<Apdu>> {
+        self.stats.complex_acks += 1;
+        self.transaction_manager.complete_transaction(invoke_id);
+        Ok(None)
+    }
+
+    /// Process an error PDU
+    fn process_error(
+        &mut self,
+        invoke_id: u8,
+        service_choice: u8,
+        error_class: u8,
+        error_code: u8,
+    ) -> Result<Option<Apdu>> {
+        self.stats.errors += 1;
+        self.transaction_manager.error_transaction(invoke_id, error_class, error_code);
+        Ok(None)
+    }
+
+    /// Process a reject PDU
+    fn process_reject(&mut self, invoke_id: u8, reject_reason: u8) -> Result<Option<Apdu>> {
+        self.stats.rejects += 1;
+        self.transaction_manager.reject_transaction(invoke_id, reject_reason);
+        Ok(None)
+    }
+
+    /// Process an abort PDU
+    fn process_abort(&mut self, server: bool, invoke_id: u8, abort_reason: u8) -> Result<Option<Apdu>> {
+        self.stats.aborts += 1;
+        self.transaction_manager.abort_transaction(invoke_id, abort_reason);
+        Ok(None)
+    }
+
+    /// Set a service processor
+    pub fn set_read_property_handler<F>(&mut self, handler: F)
+    where
+        F: Fn(&[u8]) -> Result<Vec<u8>> + Send + Sync + 'static,
+    {
+        self.service_processors.read_property = Some(Box::new(handler));
+    }
+
+    /// Set Who-Is processor
+    pub fn set_who_is_handler<F>(&mut self, handler: F)
+    where
+        F: Fn(&[u8]) -> Result<Option<Vec<u8>>> + Send + Sync + 'static,
+    {
+        self.service_processors.who_is = Some(Box::new(handler));
+    }
+}
+
+/// Transaction manager for tracking active transactions
+#[derive(Debug)]
+pub struct TransactionManager {
+    /// Active transactions
+    transactions: Vec<Transaction>,
+    /// Maximum concurrent transactions
+    max_transactions: usize,
+    /// Transaction timeout
+    #[cfg(feature = "std")]
+    timeout: Duration,
+}
+
+impl TransactionManager {
+    /// Create a new transaction manager
+    pub fn new() -> Self {
+        Self {
+            transactions: Vec::new(),
+            max_transactions: 255,
+            #[cfg(feature = "std")]
+            timeout: Duration::from_secs(30),
+        }
+    }
+
+    /// Start a new transaction
+    pub fn start_transaction(&mut self, invoke_id: u8, service_choice: u8) -> Result<()> {
+        if self.transactions.len() >= self.max_transactions {
+            return Err(ApplicationError::TransactionError("Too many active transactions".to_string()));
+        }
+
+        // Check for duplicate invoke ID
+        if self.transactions.iter().any(|t| t.invoke_id == invoke_id && t.state == TransactionState::AwaitConfirmation) {
+            return Err(ApplicationError::TransactionError("Duplicate invoke ID".to_string()));
+        }
+
+        self.transactions.push(Transaction {
+            invoke_id,
+            service: service_choice,
+            state: TransactionState::AwaitConfirmation,
+            timeout: Duration::from_secs(30),
+            retries: 0,
+        });
+
+        Ok(())
+    }
+
+    /// Complete a transaction
+    pub fn complete_transaction(&mut self, invoke_id: u8) {
+        if let Some(transaction) = self.transactions.iter_mut().find(|t| t.invoke_id == invoke_id) {
+            transaction.state = TransactionState::Complete;
+        }
+    }
+
+    /// Mark transaction as error
+    pub fn error_transaction(&mut self, invoke_id: u8, _error_class: u8, _error_code: u8) {
+        if let Some(transaction) = self.transactions.iter_mut().find(|t| t.invoke_id == invoke_id) {
+            transaction.state = TransactionState::Complete;
+        }
+    }
+
+    /// Mark transaction as rejected
+    pub fn reject_transaction(&mut self, invoke_id: u8, _reject_reason: u8) {
+        if let Some(transaction) = self.transactions.iter_mut().find(|t| t.invoke_id == invoke_id) {
+            transaction.state = TransactionState::Complete;
+        }
+    }
+
+    /// Mark transaction as aborted
+    pub fn abort_transaction(&mut self, invoke_id: u8, _abort_reason: u8) {
+        if let Some(transaction) = self.transactions.iter_mut().find(|t| t.invoke_id == invoke_id) {
+            transaction.state = TransactionState::Complete;
+        }
+    }
+
+    /// Clean up completed transactions
+    pub fn cleanup_completed(&mut self) {
+        self.transactions.retain(|t| t.state != TransactionState::Complete);
+    }
+
+    /// Get active transaction count
+    pub fn active_count(&self) -> usize {
+        self.transactions.iter()
+            .filter(|t| t.state != TransactionState::Complete)
+            .count()
+    }
+}
+
+impl Default for TransactionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Application layer statistics
+#[derive(Debug, Default)]
+pub struct ApplicationStatistics {
+    /// Total APDUs received
+    pub apdus_received: u64,
+    /// Total APDUs sent
+    pub apdus_sent: u64,
+    /// Confirmed requests received
+    pub confirmed_requests: u64,
+    /// Unconfirmed requests received
+    pub unconfirmed_requests: u64,
+    /// Simple ACKs received
+    pub simple_acks: u64,
+    /// Complex ACKs received
+    pub complex_acks: u64,
+    /// Errors received
+    pub errors: u64,
+    /// Rejects received
+    pub rejects: u64,
+    /// Aborts received
+    pub aborts: u64,
+    /// Unknown APDU types
+    pub unknown_apdus: u64,
+    /// Segmentation errors
+    pub segmentation_errors: u64,
+}
+
+/// Priority queue for application messages
+#[derive(Debug)]
+pub struct ApplicationPriorityQueue {
+    /// High priority queue
+    high: Vec<QueuedMessage>,
+    /// Normal priority queue
+    normal: Vec<QueuedMessage>,
+    /// Low priority queue
+    low: Vec<QueuedMessage>,
+    /// Maximum queue size per priority
+    max_queue_size: usize,
+}
+
+/// Queued message
+#[derive(Debug)]
+struct QueuedMessage {
+    /// APDU to send
+    apdu: Apdu,
+    /// Destination address
+    destination: Vec<u8>,
+    /// Timestamp
+    #[cfg(feature = "std")]
+    timestamp: std::time::Instant,
+    /// Retry count
+    retry_count: u8,
+}
+
+impl ApplicationPriorityQueue {
+    /// Create a new priority queue
+    pub fn new(max_queue_size: usize) -> Self {
+        Self {
+            high: Vec::with_capacity(max_queue_size),
+            normal: Vec::with_capacity(max_queue_size),
+            low: Vec::with_capacity(max_queue_size),
+            max_queue_size,
+        }
+    }
+
+    /// Queue a message
+    pub fn enqueue(&mut self, apdu: Apdu, destination: Vec<u8>, priority: MessagePriority) -> Result<()> {
+        let queue = match priority {
+            MessagePriority::High => &mut self.high,
+            MessagePriority::Normal => &mut self.normal,
+            MessagePriority::Low => &mut self.low,
+        };
+
+        if queue.len() >= self.max_queue_size {
+            return Err(ApplicationError::TransactionError("Queue full".to_string()));
+        }
+
+        queue.push(QueuedMessage {
+            apdu,
+            destination,
+            #[cfg(feature = "std")]
+            timestamp: std::time::Instant::now(),
+            retry_count: 0,
+        });
+
+        Ok(())
+    }
+
+    /// Dequeue next message
+    pub fn dequeue(&mut self) -> Option<(Apdu, Vec<u8>)> {
+        if let Some(msg) = self.high.pop() {
+            return Some((msg.apdu, msg.destination));
+        }
+        if let Some(msg) = self.normal.pop() {
+            return Some((msg.apdu, msg.destination));
+        }
+        if let Some(msg) = self.low.pop() {
+            return Some((msg.apdu, msg.destination));
+        }
+        None
+    }
+
+    /// Get total queued messages
+    pub fn total_queued(&self) -> usize {
+        self.high.len() + self.normal.len() + self.low.len()
+    }
+
+    /// Clear all queues
+    pub fn clear(&mut self) {
+        self.high.clear();
+        self.normal.clear();
+        self.low.clear();
+    }
+}
+
+/// Message priority levels
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessagePriority {
+    /// High priority (alarms, life safety)
+    High,
+    /// Normal priority (most messages)
+    Normal,
+    /// Low priority (non-critical)
+    Low,
+}
+
+/// PDU flags for segmentation control
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PduFlags {
+    /// Segmented message
+    pub segmented: bool,
+    /// More segments follow
+    pub more_follows: bool,
+    /// Segmented response accepted
+    pub segmented_response_accepted: bool,
+}
+
+/// Application layer configuration
+#[derive(Debug, Clone)]
+pub struct ApplicationConfig {
+    /// Maximum APDU length
+    pub max_apdu_length: u16,
+    /// Segmentation support
+    pub segmentation: Segmentation,
+    /// APDU timeout (milliseconds)
+    pub apdu_timeout: u16,
+    /// Number of APDU retries
+    pub apdu_retries: u8,
+    /// Maximum segments accepted
+    pub max_segments: u8,
+    /// Invoke ID start value
+    pub invoke_id_start: u8,
+}
+
+impl Default for ApplicationConfig {
+    fn default() -> Self {
+        Self {
+            max_apdu_length: 1476,
+            segmentation: Segmentation::Both,
+            apdu_timeout: 6000,
+            apdu_retries: 3,
+            max_segments: 64,
+            invoke_id_start: 0,
+        }
     }
 }
 

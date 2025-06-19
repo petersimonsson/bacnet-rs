@@ -935,6 +935,443 @@ pub struct NetworkHealthSummary {
     pub average_latency: Option<f32>,
 }
 
+/// Network layer message handler
+#[derive(Debug)]
+pub struct NetworkLayerHandler {
+    /// Local network number
+    pub local_network: u16,
+    /// Router information cache
+    pub routers: Vec<RouterInfo>,
+    /// Network message processors
+    processors: NetworkMessageProcessors,
+    /// Network statistics
+    pub stats: NetworkStatistics,
+}
+
+/// Network message processors
+#[derive(Debug, Default)]
+struct NetworkMessageProcessors {
+    /// Process Who-Is-Router-To-Network messages
+    who_is_router_handler: Option<fn(&NetworkAddress, Option<u16>) -> Option<NetworkLayerMessage>>,
+    /// Process I-Am-Router-To-Network messages
+    i_am_router_handler: Option<fn(&NetworkAddress, &[u16]) -> Option<NetworkLayerMessage>>,
+}
+
+impl NetworkLayerHandler {
+    /// Create a new network layer handler
+    pub fn new(local_network: u16) -> Self {
+        Self {
+            local_network,
+            routers: Vec::new(),
+            processors: NetworkMessageProcessors::default(),
+            stats: NetworkStatistics::default(),
+        }
+    }
+
+    /// Process an incoming NPDU
+    pub fn process_npdu(&mut self, npdu: &Npdu, source_address: &NetworkAddress) -> Result<Option<NetworkResponse>> {
+        self.stats.record_received();
+        
+        if npdu.is_network_message() {
+            self.process_network_message(npdu, source_address)
+        } else {
+            // Regular application layer message
+            Ok(Some(NetworkResponse::ApplicationData))
+        }
+    }
+
+    /// Process a network layer message
+    fn process_network_message(&mut self, npdu: &Npdu, source_address: &NetworkAddress) -> Result<Option<NetworkResponse>> {
+        // Network messages have their type in the first byte after the NPDU header
+        // This would need to be implemented based on the actual message content
+        Ok(None)
+    }
+
+    /// Send Who-Is-Router-To-Network message
+    pub fn who_is_router(&mut self, network: Option<u16>) -> Npdu {
+        self.stats.record_sent();
+        
+        let mut npdu = Npdu::new();
+        npdu.control.network_message = true;
+        npdu.control.priority = 3; // Normal priority
+        
+        // Message content would include the network number if specified
+        npdu
+    }
+
+    /// Send I-Am-Router-To-Network message
+    pub fn i_am_router(&mut self, networks: &[u16]) -> Npdu {
+        self.stats.record_sent();
+        
+        let mut npdu = Npdu::new();
+        npdu.control.network_message = true;
+        npdu.control.priority = 3;
+        
+        // Message content would include the list of networks
+        npdu
+    }
+
+    /// Update router information
+    pub fn update_router(&mut self, router_info: RouterInfo) {
+        // Check if router already exists
+        if let Some(existing) = self.routers.iter_mut().find(|r| r.address == router_info.address) {
+            existing.networks = router_info.networks;
+            existing.performance_index = router_info.performance_index;
+        } else {
+            self.routers.push(router_info);
+        }
+    }
+
+    /// Find best router for a network
+    pub fn find_router(&self, network: u16) -> Option<&RouterInfo> {
+        self.routers
+            .iter()
+            .filter(|r| r.networks.contains(&network))
+            .min_by_key(|r| r.performance_index.unwrap_or(255))
+    }
+}
+
+/// Network layer response types
+#[derive(Debug)]
+pub enum NetworkResponse {
+    /// Application layer data (pass through)
+    ApplicationData,
+    /// Network layer message response
+    NetworkMessage(Npdu),
+    /// Routing table update
+    RoutingUpdate(Vec<RouterInfo>),
+}
+
+/// Network priority levels
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum NetworkPriority {
+    /// Life Safety messages (highest priority)
+    LifeSafety = 3,
+    /// Critical Equipment messages
+    CriticalEquipment = 2,
+    /// Urgent messages
+    Urgent = 1,
+    /// Normal messages (lowest priority)
+    Normal = 0,
+}
+
+impl NetworkPriority {
+    /// Convert to NPDU priority bits
+    pub fn to_bits(self) -> u8 {
+        self as u8
+    }
+
+    /// Create from NPDU priority bits
+    pub fn from_bits(bits: u8) -> Self {
+        match bits & 0x03 {
+            3 => NetworkPriority::LifeSafety,
+            2 => NetworkPriority::CriticalEquipment,
+            1 => NetworkPriority::Urgent,
+            _ => NetworkPriority::Normal,
+        }
+    }
+}
+
+/// Network layer statistics
+#[derive(Debug, Default)]
+pub struct NetworkStatistics {
+    /// Total NPDUs received
+    pub npdus_received: u64,
+    /// Total NPDUs sent
+    pub npdus_sent: u64,
+    /// Routing failures
+    pub routing_failures: u64,
+    /// Messages forwarded
+    pub messages_forwarded: u64,
+    /// Network layer errors
+    pub network_errors: u64,
+    /// Last update time
+    #[cfg(feature = "std")]
+    pub last_update: Option<std::time::Instant>,
+}
+
+impl NetworkStatistics {
+    /// Update statistics for received NPDU
+    pub fn record_received(&mut self) {
+        self.npdus_received += 1;
+        #[cfg(feature = "std")]
+        {
+            self.last_update = Some(std::time::Instant::now());
+        }
+    }
+
+    /// Update statistics for sent NPDU
+    pub fn record_sent(&mut self) {
+        self.npdus_sent += 1;
+        #[cfg(feature = "std")]
+        {
+            self.last_update = Some(std::time::Instant::now());
+        }
+    }
+
+    /// Record a routing failure
+    pub fn record_routing_failure(&mut self) {
+        self.routing_failures += 1;
+        self.network_errors += 1;
+    }
+
+    /// Record a forwarded message
+    pub fn record_forwarded(&mut self) {
+        self.messages_forwarded += 1;
+    }
+}
+
+/// Broadcast distribution table (BDT) entry
+#[derive(Debug, Clone)]
+pub struct BdtEntry {
+    /// Broadcast distribution mask (network numbers)
+    pub networks: Vec<u16>,
+    /// Address to send broadcasts
+    pub address: NetworkAddress,
+    /// Entry is valid
+    pub valid: bool,
+}
+
+/// Broadcast distribution table manager
+#[derive(Debug)]
+pub struct BroadcastDistributionTable {
+    /// BDT entries
+    entries: Vec<BdtEntry>,
+    /// Maximum number of entries
+    max_entries: usize,
+}
+
+impl BroadcastDistributionTable {
+    /// Create a new BDT
+    pub fn new(max_entries: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(max_entries),
+            max_entries,
+        }
+    }
+
+    /// Add or update a BDT entry
+    pub fn update_entry(&mut self, entry: BdtEntry) -> Result<()> {
+        // Check if entry already exists
+        if let Some(existing) = self.entries.iter_mut().find(|e| e.address == entry.address) {
+            *existing = entry;
+        } else if self.entries.len() < self.max_entries {
+            self.entries.push(entry);
+        } else {
+            return Err(NetworkError::InvalidNpdu("BDT full".to_string()));
+        }
+        Ok(())
+    }
+
+    /// Remove a BDT entry
+    pub fn remove_entry(&mut self, address: &NetworkAddress) {
+        self.entries.retain(|e| e.address != *address);
+    }
+
+    /// Get addresses for broadcasting to a network
+    pub fn get_broadcast_addresses(&self, network: u16) -> Vec<&NetworkAddress> {
+        self.entries
+            .iter()
+            .filter(|e| e.valid && e.networks.contains(&network))
+            .map(|e| &e.address)
+            .collect()
+    }
+
+    /// Clear all entries
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
+/// Foreign device table (FDT) entry
+#[derive(Debug, Clone)]
+pub struct FdtEntry {
+    /// Foreign device address
+    pub address: NetworkAddress,
+    /// Time-to-live (seconds)
+    pub ttl: u16,
+    /// Remaining time (seconds)
+    pub remaining_time: u16,
+    /// Registration timestamp
+    #[cfg(feature = "std")]
+    pub registered_at: std::time::Instant,
+}
+
+/// Foreign device table manager
+#[derive(Debug)]
+pub struct ForeignDeviceTable {
+    /// FDT entries
+    entries: Vec<FdtEntry>,
+    /// Maximum number of entries
+    max_entries: usize,
+}
+
+impl ForeignDeviceTable {
+    /// Create a new FDT
+    pub fn new(max_entries: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(max_entries),
+            max_entries,
+        }
+    }
+
+    /// Register a foreign device
+    pub fn register(&mut self, address: NetworkAddress, ttl: u16) -> Result<()> {
+        // Check if already registered
+        if let Some(existing) = self.entries.iter_mut().find(|e| e.address == address) {
+            existing.ttl = ttl;
+            existing.remaining_time = ttl;
+            #[cfg(feature = "std")]
+            {
+                existing.registered_at = std::time::Instant::now();
+            }
+        } else if self.entries.len() < self.max_entries {
+            self.entries.push(FdtEntry {
+                address,
+                ttl,
+                remaining_time: ttl,
+                #[cfg(feature = "std")]
+                registered_at: std::time::Instant::now(),
+            });
+        } else {
+            return Err(NetworkError::InvalidNpdu("FDT full".to_string()));
+        }
+        Ok(())
+    }
+
+    /// Delete a foreign device
+    pub fn delete(&mut self, address: &NetworkAddress) -> Result<()> {
+        self.entries.retain(|e| e.address != *address);
+        Ok(())
+    }
+
+    /// Update remaining times (called periodically)
+    pub fn update_times(&mut self, elapsed_seconds: u16) {
+        self.entries.retain_mut(|entry| {
+            if entry.remaining_time > elapsed_seconds {
+                entry.remaining_time -= elapsed_seconds;
+                true
+            } else {
+                false // Remove expired entries
+            }
+        });
+    }
+
+    /// Get all active foreign devices
+    pub fn get_active_devices(&self) -> Vec<&NetworkAddress> {
+        self.entries.iter().map(|e| &e.address).collect()
+    }
+
+    /// Check if a device is registered
+    pub fn is_registered(&self, address: &NetworkAddress) -> bool {
+        self.entries.iter().any(|e| e.address == *address)
+    }
+}
+
+/// Network security manager
+#[derive(Debug)]
+pub struct NetworkSecurityManager {
+    /// Allowed source networks
+    allowed_networks: Vec<u16>,
+    /// Blocked source networks
+    blocked_networks: Vec<u16>,
+    /// Allow broadcasts
+    allow_broadcasts: bool,
+    /// Security statistics
+    security_stats: SecurityStatistics,
+}
+
+/// Security statistics
+#[derive(Debug, Default)]
+pub struct SecurityStatistics {
+    /// Messages accepted
+    pub accepted: u64,
+    /// Messages rejected
+    pub rejected: u64,
+    /// Blocked network attempts
+    pub blocked_attempts: u64,
+}
+
+impl NetworkSecurityManager {
+    /// Create a new security manager
+    pub fn new() -> Self {
+        Self {
+            allowed_networks: Vec::new(),
+            blocked_networks: Vec::new(),
+            allow_broadcasts: true,
+            security_stats: SecurityStatistics::default(),
+        }
+    }
+
+    /// Check if a message should be accepted
+    pub fn check_message(&mut self, npdu: &Npdu) -> bool {
+        // Check source network if present
+        if let Some(ref source) = npdu.source {
+            if self.blocked_networks.contains(&source.network) {
+                self.security_stats.blocked_attempts += 1;
+                self.security_stats.rejected += 1;
+                return false;
+            }
+
+            if !self.allowed_networks.is_empty() && !self.allowed_networks.contains(&source.network) {
+                self.security_stats.rejected += 1;
+                return false;
+            }
+        }
+
+        // Check broadcast permission
+        if !self.allow_broadcasts {
+            if let Some(ref dest) = npdu.destination {
+                if dest.is_broadcast() {
+                    self.security_stats.rejected += 1;
+                    return false;
+                }
+            }
+        }
+
+        self.security_stats.accepted += 1;
+        true
+    }
+
+    /// Add allowed network
+    pub fn allow_network(&mut self, network: u16) {
+        if !self.allowed_networks.contains(&network) {
+            self.allowed_networks.push(network);
+        }
+    }
+
+    /// Block a network
+    pub fn block_network(&mut self, network: u16) {
+        if !self.blocked_networks.contains(&network) {
+            self.blocked_networks.push(network);
+        }
+        // Remove from allowed if present
+        self.allowed_networks.retain(|&n| n != network);
+    }
+
+    /// Set broadcast permission
+    pub fn set_allow_broadcasts(&mut self, allow: bool) {
+        self.allow_broadcasts = allow;
+    }
+
+    /// Get security statistics
+    pub fn get_stats(&self) -> &SecurityStatistics {
+        &self.security_stats
+    }
+
+    /// Reset security statistics
+    pub fn reset_stats(&mut self) {
+        self.security_stats = SecurityStatistics::default();
+    }
+}
+
+impl Default for NetworkSecurityManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
