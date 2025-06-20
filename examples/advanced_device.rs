@@ -9,22 +9,19 @@
 
 use bacnet_rs::{
     app::{Apdu, MaxSegments, MaxApduSize},
-    datalink::{bip::BacnetIpDataLink, DataLink},
     network::Npdu,
     object::{
-        Device, ObjectIdentifier, ObjectType, PropertyIdentifier, PropertyValue, BacnetObject,
+        Device, ObjectIdentifier, ObjectType, PropertyIdentifier, BacnetObject,
         AnalogInput, AnalogOutput, AnalogValue, BinaryInput, BinaryOutput, BinaryValue,
         BinaryPV, EngineeringUnits,
     },
     service::{
-        WhoIsRequest, IAmRequest, ReadPropertyRequest, WritePropertyRequest,
+        WritePropertyRequest,
         ReadPropertyMultipleRequest, ReadAccessSpecification, PropertyReference,
         SubscribeCovRequest, CovSubscriptionManager, CovSubscription,
-        UnconfirmedServiceChoice, ConfirmedServiceChoice,
+        ConfirmedServiceChoice,
     },
 };
-
-use std::net::SocketAddr;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("BACnet-RS Advanced Device Example");

@@ -1059,7 +1059,7 @@ impl Default for SegmentationManager {
 #[derive(Debug)]
 pub struct ApplicationLayerHandler {
     /// Device instance for this application
-    device_instance: u32,
+    _device_instance: u32,
     /// Supported services
     supported_services: SupportedServices,
     /// Transaction manager
@@ -1124,7 +1124,7 @@ impl ApplicationLayerHandler {
     /// Create a new application layer handler
     pub fn new(device_instance: u32) -> Self {
         Self {
-            device_instance,
+            _device_instance: device_instance,
             supported_services: SupportedServices::default(),
             transaction_manager: TransactionManager::new(),
             service_processors: ServiceProcessors::default(),
@@ -1133,13 +1133,13 @@ impl ApplicationLayerHandler {
     }
 
     /// Process an incoming APDU
-    pub fn process_apdu(&mut self, apdu: &Apdu, source: &[u8]) -> Result<Option<Apdu>> {
+    pub fn process_apdu(&mut self, apdu: &Apdu, _source: &[u8]) -> Result<Option<Apdu>> {
         self.stats.apdus_received += 1;
 
         match apdu {
             Apdu::ConfirmedRequest { segmented, more_follows, segmented_response_accepted, 
-                                   max_segments, max_response_size, invoke_id, sequence_number, 
-                                   proposed_window_size, service_choice, service_data } => {
+                                   max_segments: _, max_response_size: _, invoke_id, sequence_number: _, 
+                                   proposed_window_size: _, service_choice, service_data } => {
                 let pdu_flags = PduFlags {
                     segmented: *segmented,
                     more_follows: *more_follows,
@@ -1153,8 +1153,8 @@ impl ApplicationLayerHandler {
             Apdu::SimpleAck { invoke_id, service_choice } => {
                 self.process_simple_ack(*invoke_id, *service_choice)
             }
-            Apdu::ComplexAck { segmented, more_follows, invoke_id, sequence_number, 
-                             proposed_window_size, service_choice, service_data } => {
+            Apdu::ComplexAck { segmented, more_follows, invoke_id, sequence_number: _, 
+                             proposed_window_size: _, service_choice, service_data } => {
                 let pdu_flags = PduFlags {
                     segmented: *segmented,
                     more_follows: *more_follows,
@@ -1181,7 +1181,7 @@ impl ApplicationLayerHandler {
     /// Process a confirmed request
     fn process_confirmed_request(
         &mut self,
-        pdu_flags: PduFlags,
+        _pdu_flags: PduFlags,
         invoke_id: u8,
         service_choice: u8,
         service_data: &[u8],
@@ -1296,7 +1296,7 @@ impl ApplicationLayerHandler {
     }
 
     /// Process a simple ACK
-    fn process_simple_ack(&mut self, invoke_id: u8, service_choice: u8) -> Result<Option<Apdu>> {
+    fn process_simple_ack(&mut self, invoke_id: u8, _service_choice: u8) -> Result<Option<Apdu>> {
         self.stats.simple_acks += 1;
         self.transaction_manager.complete_transaction(invoke_id);
         Ok(None)
@@ -1305,10 +1305,10 @@ impl ApplicationLayerHandler {
     /// Process a complex ACK
     fn process_complex_ack(
         &mut self,
-        pdu_flags: PduFlags,
+        _pdu_flags: PduFlags,
         invoke_id: u8,
-        service_choice: u8,
-        service_data: &[u8],
+        _service_choice: u8,
+        _service_data: &[u8],
     ) -> Result<Option<Apdu>> {
         self.stats.complex_acks += 1;
         self.transaction_manager.complete_transaction(invoke_id);
@@ -1319,7 +1319,7 @@ impl ApplicationLayerHandler {
     fn process_error(
         &mut self,
         invoke_id: u8,
-        service_choice: u8,
+        _service_choice: u8,
         error_class: u8,
         error_code: u8,
     ) -> Result<Option<Apdu>> {
@@ -1329,14 +1329,14 @@ impl ApplicationLayerHandler {
     }
 
     /// Process a reject PDU
-    fn process_reject(&mut self, invoke_id: u8, reject_reason: u8) -> Result<Option<Apdu>> {
+    fn process_reject(&mut self, invoke_id: u8, _reject_reason: u8) -> Result<Option<Apdu>> {
         self.stats.rejects += 1;
-        self.transaction_manager.reject_transaction(invoke_id, reject_reason);
+        self.transaction_manager.reject_transaction(invoke_id, _reject_reason);
         Ok(None)
     }
 
     /// Process an abort PDU
-    fn process_abort(&mut self, server: bool, invoke_id: u8, abort_reason: u8) -> Result<Option<Apdu>> {
+    fn process_abort(&mut self, _server: bool, invoke_id: u8, abort_reason: u8) -> Result<Option<Apdu>> {
         self.stats.aborts += 1;
         self.transaction_manager.abort_transaction(invoke_id, abort_reason);
         Ok(None)
@@ -1368,7 +1368,7 @@ pub struct TransactionManager {
     max_transactions: usize,
     /// Transaction timeout
     #[cfg(feature = "std")]
-    timeout: Duration,
+    _timeout: Duration,
 }
 
 impl TransactionManager {
@@ -1378,7 +1378,7 @@ impl TransactionManager {
             transactions: Vec::new(),
             max_transactions: 255,
             #[cfg(feature = "std")]
-            timeout: Duration::from_secs(30),
+            _timeout: Duration::from_secs(30),
         }
     }
 
@@ -1500,9 +1500,9 @@ struct QueuedMessage {
     destination: Vec<u8>,
     /// Timestamp
     #[cfg(feature = "std")]
-    timestamp: std::time::Instant,
+    _timestamp: std::time::Instant,
     /// Retry count
-    retry_count: u8,
+    _retry_count: u8,
 }
 
 impl ApplicationPriorityQueue {
@@ -1532,8 +1532,8 @@ impl ApplicationPriorityQueue {
             apdu,
             destination,
             #[cfg(feature = "std")]
-            timestamp: std::time::Instant::now(),
-            retry_count: 0,
+            _timestamp: std::time::Instant::now(),
+            _retry_count: 0,
         });
 
         Ok(())
@@ -1770,7 +1770,7 @@ mod tests {
         assert_eq!(buffer.invoke_id, 42);
         assert_eq!(buffer.max_apdu_length, 1024);
         assert!(!buffer.is_complete());
-        assert_eq!(buffer.missing_segments(), vec![]);
+        assert_eq!(buffer.missing_segments(), Vec::<u8>::new());
 
         // Add segments
         buffer.add_segment(0, vec![1, 2, 3], false).unwrap();

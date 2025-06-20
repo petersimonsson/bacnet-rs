@@ -943,7 +943,7 @@ pub struct NetworkLayerHandler {
     /// Router information cache
     pub routers: Vec<RouterInfo>,
     /// Network message processors
-    processors: NetworkMessageProcessors,
+    _processors: NetworkMessageProcessors,
     /// Network statistics
     pub stats: NetworkStatistics,
 }
@@ -952,9 +952,9 @@ pub struct NetworkLayerHandler {
 #[derive(Debug, Default)]
 struct NetworkMessageProcessors {
     /// Process Who-Is-Router-To-Network messages
-    who_is_router_handler: Option<fn(&NetworkAddress, Option<u16>) -> Option<NetworkLayerMessage>>,
+    _who_is_router_handler: Option<fn(&NetworkAddress, Option<u16>) -> Option<NetworkLayerMessage>>,
     /// Process I-Am-Router-To-Network messages
-    i_am_router_handler: Option<fn(&NetworkAddress, &[u16]) -> Option<NetworkLayerMessage>>,
+    _i_am_router_handler: Option<fn(&NetworkAddress, &[u16]) -> Option<NetworkLayerMessage>>,
 }
 
 impl NetworkLayerHandler {
@@ -963,7 +963,7 @@ impl NetworkLayerHandler {
         Self {
             local_network,
             routers: Vec::new(),
-            processors: NetworkMessageProcessors::default(),
+            _processors: NetworkMessageProcessors::default(),
             stats: NetworkStatistics::default(),
         }
     }
@@ -981,14 +981,14 @@ impl NetworkLayerHandler {
     }
 
     /// Process a network layer message
-    fn process_network_message(&mut self, npdu: &Npdu, source_address: &NetworkAddress) -> Result<Option<NetworkResponse>> {
+    fn process_network_message(&mut self, _npdu: &Npdu, _source_address: &NetworkAddress) -> Result<Option<NetworkResponse>> {
         // Network messages have their type in the first byte after the NPDU header
         // This would need to be implemented based on the actual message content
         Ok(None)
     }
 
     /// Send Who-Is-Router-To-Network message
-    pub fn who_is_router(&mut self, network: Option<u16>) -> Npdu {
+    pub fn who_is_router(&mut self, _network: Option<u16>) -> Npdu {
         self.stats.record_sent();
         
         let mut npdu = Npdu::new();
@@ -1000,7 +1000,7 @@ impl NetworkLayerHandler {
     }
 
     /// Send I-Am-Router-To-Network message
-    pub fn i_am_router(&mut self, networks: &[u16]) -> Npdu {
+    pub fn i_am_router(&mut self, _networks: &[u16]) -> Npdu {
         self.stats.record_sent();
         
         let mut npdu = Npdu::new();

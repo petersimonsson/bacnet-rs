@@ -1202,7 +1202,7 @@ impl<'a> DecodingStream<'a> {
 
     /// Skip a value
     pub fn skip_value(&mut self) -> Result<()> {
-        let (tag, length, consumed) = decode_application_tag(&self.data[self.position..])?;
+        let (_tag, length, consumed) = decode_application_tag(&self.data[self.position..])?;
         self.position += consumed + length;
         Ok(())
     }
@@ -1348,16 +1348,16 @@ pub struct EncodingStatistics {
 #[derive(Debug, Clone)]
 struct EncodingBenchmark {
     /// Data type being benchmarked
-    data_type: &'static str,
+    _data_type: &'static str,
     /// Data size in bytes
-    size: usize,
+    _size: usize,
     /// Encoding time in microseconds
-    encode_time_us: u64,
+    _encode_time_us: u64,
     /// Decoding time in microseconds
-    decode_time_us: u64,
+    _decode_time_us: u64,
     /// Timestamp
     #[cfg(feature = "std")]
-    timestamp: std::time::Instant,
+    _timestamp: std::time::Instant,
 }
 
 /// Error pattern tracking
@@ -1389,12 +1389,12 @@ impl EncodingAnalyzer {
 
         // Store benchmark data
         self.benchmarks.push(EncodingBenchmark {
-            data_type,
-            size: bytes,
-            encode_time_us: duration_us,
-            decode_time_us: 0,
+            _data_type: data_type,
+            _size: bytes,
+            _encode_time_us: duration_us,
+            _decode_time_us: 0,
             #[cfg(feature = "std")]
-            timestamp: std::time::Instant::now(),
+            _timestamp: std::time::Instant::now(),
         });
 
         // Keep only recent benchmarks (last 1000)
@@ -1404,7 +1404,7 @@ impl EncodingAnalyzer {
     }
 
     /// Record a decoding operation
-    pub fn record_decoding(&mut self, data_type: &'static str, bytes: usize, duration_us: u64) {
+    pub fn record_decoding(&mut self, _data_type: &'static str, bytes: usize, duration_us: u64) {
         self.stats.total_decodings += 1;
         self.stats.bytes_decoded += bytes as u64;
         
@@ -1620,7 +1620,7 @@ impl Default for EncodingConfig {
 #[derive(Debug)]
 pub struct EncodingManager {
     /// Configuration
-    config: EncodingConfig,
+    _config: EncodingConfig,
     /// Performance analyzer
     analyzer: Option<EncodingAnalyzer>,
     /// Encoding cache
@@ -1645,7 +1645,7 @@ impl EncodingManager {
         };
 
         Self {
-            config,
+            _config: config,
             analyzer,
             cache,
             buffer_manager: advanced::BufferManager::new(8192),

@@ -9,12 +9,14 @@ pub mod object;
 pub mod service;
 pub mod transport;
 pub mod util;
+pub mod vendor;
 
 // Re-export main types without glob imports to avoid conflicts
 pub use datalink::{DataLink, DataLinkAddress, DataLinkType};
 pub use encoding::{ApplicationTag, EncodingError};
 pub use object::{BacnetObject, ObjectType, PropertyIdentifier};
 pub use service::{ConfirmedServiceChoice, ServiceError, UnconfirmedServiceChoice};
+pub use vendor::{VendorInfo, get_vendor_name, get_vendor_info, format_vendor_display};
 
 #[cfg(feature = "std")]
 extern crate std;

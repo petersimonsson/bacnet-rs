@@ -377,6 +377,48 @@ impl Device {
             self.object_types_supported.push(object_type);
         }
     }
+
+    /// Get the vendor information for this device
+    pub fn get_vendor_info(&self) -> Option<crate::vendor::VendorInfo> {
+        crate::vendor::get_vendor_info(self.vendor_identifier)
+    }
+
+    /// Get the official vendor name from the vendor ID
+    pub fn get_official_vendor_name(&self) -> Option<&'static str> {
+        crate::vendor::get_vendor_name(self.vendor_identifier)
+    }
+
+    /// Set vendor information using an official vendor ID
+    pub fn set_vendor_by_id(&mut self, vendor_id: u16) -> Result<()> {
+        if let Some(vendor_info) = crate::vendor::get_vendor_info(vendor_id) {
+            self.vendor_identifier = vendor_id;
+            self.vendor_name = vendor_info.name.to_string();
+            Ok(())
+        } else {
+            Err(ObjectError::InvalidPropertyType)
+        }
+    }
+
+    /// Set vendor information with custom name (preserves vendor ID)
+    pub fn set_vendor_name(&mut self, name: String) {
+        self.vendor_name = name;
+    }
+
+    /// Check if the current vendor ID is officially assigned
+    pub fn is_vendor_id_official(&self) -> bool {
+        crate::vendor::is_vendor_id_assigned(self.vendor_identifier) && 
+        !crate::vendor::is_vendor_id_reserved(self.vendor_identifier)
+    }
+
+    /// Check if the current vendor ID is reserved for testing
+    pub fn is_vendor_id_test(&self) -> bool {
+        crate::vendor::is_vendor_id_reserved(self.vendor_identifier)
+    }
+
+    /// Get a formatted string showing vendor information
+    pub fn format_vendor_display(&self) -> String {
+        crate::vendor::format_vendor_display(self.vendor_identifier)
+    }
 }
 
 impl BacnetObject for Device {
