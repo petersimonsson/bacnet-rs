@@ -6,8 +6,7 @@
 #[cfg(feature = "std")]
 use std::{
     net::{SocketAddr, UdpSocket},
-    time::{Duration, Instant},
-    collections::HashMap,
+    time::{Duration, Instant}
 };
 
 #[cfg(not(feature = "std"))]

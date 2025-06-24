@@ -136,18 +136,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         
         for obj in objects {
             println!("  {} Instance {}", obj.object_type_name, obj.object_identifier.instance);
+            
+            // Always show object name if available
             if let Some(name) = &obj.object_name {
-                println!("    Name: {}", name);
+                println!("    Object Name: {}", name);
+            } else {
+                println!("    Object Name: [Not Available]");
             }
+            
+            // Show description if available
             if let Some(desc) = &obj.description {
                 println!("    Description: {}", desc);
+            } else {
+                println!("    Description: [Not Available]");
             }
-            if let Some(value) = &obj.present_value {
-                println!("    Present Value: {}", value);
+            
+            // Show present value for relevant object types
+            match obj.object_identifier.object_type {
+                ObjectType::AnalogInput | ObjectType::AnalogOutput | ObjectType::AnalogValue |
+                ObjectType::BinaryInput | ObjectType::BinaryOutput | ObjectType::BinaryValue |
+                ObjectType::MultiStateInput | ObjectType::MultiStateOutput | ObjectType::MultiStateValue => {
+                    if let Some(value) = &obj.present_value {
+                        println!("    Present Value: {}", value);
+                    } else {
+                        println!("    Present Value: [Not Available]");
+                    }
+                }
+                _ => {}
             }
-            if let Some(units) = &obj.units {
-                println!("    Units: {}", units);
+            
+            // Show units for analog objects
+            match obj.object_identifier.object_type {
+                ObjectType::AnalogInput | ObjectType::AnalogOutput | ObjectType::AnalogValue => {
+                    if let Some(units) = &obj.units {
+                        println!("    Units: {}", units);
+                    } else {
+                        println!("    Units: [Not Available]");
+                    }
+                }
+                _ => {}
             }
+            
+            // Show object type for clarity
+            println!("    Object Type: {}", obj.object_type_name);
             println!();
         }
     }
@@ -527,175 +558,152 @@ fn parse_object_list_response(data: &[u8]) -> Result<Vec<ObjectIdentifier>, Box<
     let mut objects = Vec::new();
     let mut pos = 0;
     
-    println!("Debug: Response data length: {}", data.len());
-    if data.len() > 0 {
-        println!("Debug: First 20 bytes: {:02X?}", &data[..std::cmp::min(20, data.len())]);
-    }
-    
-    // Look for ReadPropertyMultiple response structure
-    // Structure: Object ID (context 0) -> List of Property Results (context 1) -> Property ID -> Property Value
-    
-    while pos < data.len() {
-        // Look for object identifier (context tag 0: 0x0C followed by 4 bytes)
-        if pos + 5 < data.len() && data[pos] == 0x0C {
-            pos += 5; // Skip object identifier
+    // Simple approach - scan for all object identifiers
+    while pos + 5 <= data.len() {
+        if data[pos] == 0xC4 { // Application tag for object identifier
+            pos += 1;
+            let obj_id_bytes = [data[pos], data[pos + 1], data[pos + 2], data[pos + 3]];
+            let obj_id = u32::from_be_bytes(obj_id_bytes);
+            let (obj_type, instance) = decode_object_id(obj_id);
             
-            // Look for property results list (context tag 1 opening: 0x1E)
-            if pos < data.len() && data[pos] == 0x1E {
-                pos += 1; // Skip opening tag
-                
-                // Look for property identifier (context tag 0: 0x09)
-                if pos + 1 < data.len() && data[pos] == 0x09 {
-                    pos += 2; // Skip property identifier
-                    
-                    // Look for property value (context tag 3 opening: 0x3E)
-                    if pos < data.len() && data[pos] == 0x3E {
-                        pos += 1; // Skip opening tag
-                        
-                        // Now we're in the object list array - look for object identifiers
-                        while pos + 5 <= data.len() {
-                            if data[pos] == 0xC4 { // Application tag for object identifier
-                                pos += 1;
-                                let obj_id_bytes = [data[pos], data[pos + 1], data[pos + 2], data[pos + 3]];
-                                let obj_id = u32::from_be_bytes(obj_id_bytes);
-                                let (obj_type, instance) = decode_object_id(obj_id);
-                                
-                                if let Ok(object_type) = ObjectType::try_from(obj_type) {
-                                    objects.push(ObjectIdentifier::new(object_type, instance));
-                                    println!("Debug: Found object: {} Instance {}", get_object_type_name(object_type), instance);
-                                }
-                                pos += 4;
-                            } else if data[pos] == 0x3F { // Closing tag for property value
-                                break;
-                            } else {
-                                pos += 1;
-                            }
-                        }
-                        break;
-                    }
-                }
+            // Skip the device object itself
+            if obj_type == 8 {
+                pos += 4;
+                continue;
             }
+            
+            if let Ok(object_type) = ObjectType::try_from(obj_type) {
+                objects.push(ObjectIdentifier::new(object_type, instance));
+            }
+            pos += 4;
         } else {
             pos += 1;
-        }
-    }
-    
-    // If the above didn't work, try a simpler approach - just scan for all object identifiers
-    if objects.is_empty() {
-        println!("Debug: Trying fallback parsing - scanning for all object identifiers");
-        pos = 0;
-        while pos + 5 <= data.len() {
-            if data[pos] == 0xC4 { // Application tag for object identifier
-                pos += 1;
-                let obj_id_bytes = [data[pos], data[pos + 1], data[pos + 2], data[pos + 3]];
-                let obj_id = u32::from_be_bytes(obj_id_bytes);
-                let (obj_type, instance) = decode_object_id(obj_id);
-                
-                // Skip the first object (device object itself)
-                if obj_type == 8 && instance == 5047 {
-                    pos += 4;
-                    continue;
-                }
-                
-                if let Ok(object_type) = ObjectType::try_from(obj_type) {
-                    objects.push(ObjectIdentifier::new(object_type, instance));
-                    println!("Debug: Found object: {} Instance {}", get_object_type_name(object_type), instance);
-                }
-                pos += 4;
-            } else {
-                pos += 1;
-            }
         }
     }
     
     Ok(objects)
 }
 
-/// Parse ReadPropertyMultiple response
+/// Parse ReadPropertyMultiple response - simplified for this device format
 fn parse_rpm_response(data: &[u8], objects: &[ObjectIdentifier]) -> Result<Vec<ObjectInfo>, Box<dyn std::error::Error>> {
     let mut objects_info = Vec::new();
+    
+    // Create ObjectInfo for each requested object first
+    for obj in objects {
+        objects_info.push(ObjectInfo::new(*obj));
+    }
+    
+    // Try to parse the response data to extract property values
     let mut pos = 0;
-    let mut obj_index = 0;
-
-    while pos < data.len() && obj_index < objects.len() {
-        let mut obj_info = ObjectInfo::new(objects[obj_index]);
-        
-        // Skip to property values section
-        while pos < data.len() {
-            if data[pos] == 0x1E { // Opening tag for property results
-                pos += 1;
-                break;
-            }
+    let mut current_obj_index = 0;
+    
+    // Debug: comment out for clean output
+    // println!("Debug: Parsing RPM response with {} bytes for {} objects", data.len(), objects.len());
+    
+    while pos < data.len() && current_obj_index < objects_info.len() {
+        // Look for object identifier context tag (0x0C)
+        while pos < data.len() && data[pos] != 0x0C {
             pos += 1;
         }
         
-        // Parse property values
-        while pos < data.len() && data[pos] != 0x1F { // Until closing tag
-            if pos + 2 < data.len() && data[pos] == 0x09 { // Property identifier
-                pos += 1;
-                let prop_id = data[pos];
-                pos += 1;
-                
-                // Find property value (opening tag 0x3E)
-                while pos < data.len() && data[pos] != 0x3E {
-                    pos += 1;
-                }
-                if pos < data.len() {
-                    pos += 1; // Skip opening tag
-                    
-                    // Extract value based on property ID
-                    match prop_id {
-                        77 => { // Object_Name
-                            if let Some(name) = extract_character_string(&data[pos..]) {
-                                obj_info.object_name = Some(name.0);
-                                pos += name.1;
-                            }
-                        }
-                        28 => { // Description  
-                            if let Some(desc) = extract_character_string(&data[pos..]) {
-                                obj_info.description = Some(desc.0);
-                                pos += desc.1;
-                            }
-                        }
-                        85 => { // Present_Value
-                            if let Some(value) = extract_present_value(&data[pos..], obj_info.object_identifier.object_type) {
-                                obj_info.present_value = Some(value.0);
-                                pos += value.1;
-                            }
-                        }
-                        117 => { // Units
-                            if let Some(units) = extract_units(&data[pos..]) {
-                                obj_info.units = Some(units.0);
-                                pos += units.1;
-                            }
-                        }
-                        _ => {
-                            // Skip unknown property
-                            pos += 1;
-                        }
-                    }
-                    
-                    // Find closing tag 0x3F
-                    while pos < data.len() && data[pos] != 0x3F {
-                        pos += 1;
-                    }
-                    if pos < data.len() {
-                        pos += 1; // Skip closing tag
-                    }
-                }
-            } else {
-                pos += 1;
+        if pos >= data.len() {
+            break;
+        }
+        
+        pos += 5; // Skip object identifier
+        
+        // Look for property results opening tag (0x1E)
+        while pos < data.len() && data[pos] != 0x1E {
+            pos += 1;
+        }
+        
+        if pos >= data.len() {
+            break;
+        }
+        
+        pos += 1; // Skip opening tag
+        
+        // Parse properties sequentially in the order they appear
+        // This device seems to send: Object_Name, Present_Value, Units (for analog objects)
+        
+        // First property: Object_Name (character string)
+        if pos < data.len() && data[pos] == 0x29 { // Skip property error/success tag
+            pos += 1;
+        }
+        if pos < data.len() && data[pos] == 0x4D { // Another tag
+            pos += 1;
+        }
+        if pos < data.len() && data[pos] == 0x4E { // Property value opening tag
+            pos += 1;
+        }
+        
+        if pos < data.len() && data[pos] == 0x75 { // Character string tag
+            if let Some((name, consumed)) = extract_character_string(&data[pos..]) {
+                // Debug: comment out for clean output
+                // println!("Debug: Extracted object name: '{}'", name);
+                objects_info[current_obj_index].object_name = Some(name);
+                pos += consumed;
             }
         }
         
+        // Skip any intermediate tags and look for present value
+        while pos < data.len() && data[pos] != 0x44 && data[pos] != 0x11 && data[pos] != 0x1F {
+            pos += 1;
+        }
+        
+        // Present value (real for analog, boolean for binary)
+        match objects_info[current_obj_index].object_identifier.object_type {
+            ObjectType::AnalogInput | ObjectType::AnalogOutput | ObjectType::AnalogValue => {
+                if pos < data.len() && data[pos] == 0x44 { // Real value tag
+                    if let Some((value, consumed)) = extract_present_value(&data[pos..], objects_info[current_obj_index].object_identifier.object_type) {
+                        // Debug: comment out for clean output
+                        // println!("Debug: Extracted present value: '{}'", value);
+                        objects_info[current_obj_index].present_value = Some(value);
+                        pos += consumed;
+                    }
+                }
+            }
+            ObjectType::BinaryInput | ObjectType::BinaryOutput | ObjectType::BinaryValue => {
+                if pos < data.len() && data[pos] == 0x11 { // Boolean value tag
+                    if let Some((value, consumed)) = extract_present_value(&data[pos..], objects_info[current_obj_index].object_identifier.object_type) {
+                        // Debug: comment out for clean output
+                        // println!("Debug: Extracted present value: '{}'", value);
+                        objects_info[current_obj_index].present_value = Some(value);
+                        pos += consumed;
+                    }
+                }
+            }
+            _ => {}
+        }
+        
+        // Skip any intermediate content and look for units (enumerated tag 0x91)
+        while pos < data.len() && data[pos] != 0x91 && data[pos] != 0x1F {
+            pos += 1;
+        }
+        
+        // Units (for analog objects)
+        if pos < data.len() && data[pos] == 0x91 { // Enumerated tag
+            if let Some((units, consumed)) = extract_units(&data[pos..]) {
+                // Debug: comment out for clean output
+                // println!("Debug: Extracted units: '{}'", units);
+                objects_info[current_obj_index].units = Some(units);
+                pos += consumed;
+            }
+        }
+        
+        // Find closing tag 0x1F
+        while pos < data.len() && data[pos] != 0x1F {
+            pos += 1;
+        }
         if pos < data.len() && data[pos] == 0x1F {
             pos += 1; // Skip closing tag
         }
         
-        objects_info.push(obj_info);
-        obj_index += 1;
+        current_obj_index += 1;
     }
     
+    // Debug: comment out for clean output
+    // println!("Debug: Successfully parsed {} objects", current_obj_index);
     Ok(objects_info)
 }
 
@@ -706,13 +714,36 @@ fn extract_character_string(data: &[u8]) -> Option<(String, usize)> {
     }
     
     let length = data[1] as usize;
-    if data.len() < 2 + length {
+    if data.len() < 2 + length || length == 0 {
         return None;
     }
     
-    // Skip encoding byte (typically 0 for ANSI X3.4)
+    // Check encoding byte
+    let encoding = data[2];
     let string_data = &data[3..2 + length];
-    let string = String::from_utf8_lossy(string_data).to_string();
+    
+    let string = match encoding {
+        0 => {
+            // ANSI X3.4 (ASCII)
+            String::from_utf8_lossy(string_data).to_string()
+        }
+        4 => {
+            // UTF-16 (UCS-2) encoding
+            if string_data.len() % 2 != 0 {
+                return None; // UTF-16 must have even number of bytes
+            }
+            let mut utf16_chars = Vec::new();
+            for chunk in string_data.chunks_exact(2) {
+                let char_code = u16::from_be_bytes([chunk[0], chunk[1]]);
+                utf16_chars.push(char_code);
+            }
+            String::from_utf16_lossy(&utf16_chars)
+        }
+        _ => {
+            // Other encodings, fallback to UTF-8
+            String::from_utf8_lossy(string_data).to_string()
+        }
+    };
     
     Some((string, 2 + length))
 }
