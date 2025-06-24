@@ -447,6 +447,73 @@ impl ReadPropertyResponse {
             property_value,
         }
     }
+
+    /// Decode a Read Property response
+    pub fn decode(data: &[u8]) -> EncodingResult<Self> {
+        let mut pos = 0;
+
+        // Decode object identifier - context tag 0
+        if pos + 5 > data.len() || data[pos] != 0x0C {
+            return Err(crate::encoding::EncodingError::InvalidTag);
+        }
+        pos += 1;
+
+        let object_id_bytes = [data[pos], data[pos + 1], data[pos + 2], data[pos + 3]];
+        let object_id = u32::from_be_bytes(object_id_bytes);
+        let (object_type, instance) = crate::util::decode_object_id(object_id);
+        let object_identifier = ObjectIdentifier {
+            object_type: crate::object::ObjectType::try_from(object_type).unwrap_or(crate::object::ObjectType::Device),
+            instance,
+        };
+        pos += 4;
+
+        // Decode property identifier - context tag 1
+        if pos + 2 > data.len() || data[pos] != 0x19 {
+            return Err(crate::encoding::EncodingError::InvalidTag);
+        }
+        pos += 1;
+        let property_identifier = data[pos] as u32;
+        pos += 1;
+
+        // Property array index - context tag 2 (optional)
+        let property_array_index = if pos < data.len() && data[pos] == 0x29 {
+            pos += 1;
+            let array_index = data[pos] as u32;
+            pos += 1;
+            Some(array_index)
+        } else {
+            None
+        };
+
+        // Property value - context tag 3
+        if pos >= data.len() || data[pos] != 0x3E {
+            return Err(crate::encoding::EncodingError::InvalidTag);
+        }
+        pos += 1;
+
+        // Find closing tag
+        let value_start = pos;
+        let mut value_end = pos;
+        while value_end < data.len() {
+            if data[value_end] == 0x3F {
+                break;
+            }
+            value_end += 1;
+        }
+
+        if value_end >= data.len() {
+            return Err(crate::encoding::EncodingError::InvalidTag);
+        }
+
+        let property_value = data[value_start..value_end].to_vec();
+
+        Ok(ReadPropertyResponse {
+            object_identifier,
+            property_identifier,
+            property_array_index,
+            property_value,
+        })
+    }
 }
 
 /// Write Property request (confirmed service)

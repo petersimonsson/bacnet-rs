@@ -65,6 +65,10 @@ required-features = ["std"]
 name = "responder_device"
 required-features = ["std"]
 
+[[example]]
+name = "device_objects"
+required-features = ["std"]
+
 [[bench]]
 name = "encoding"
 harness = false

@@ -11,6 +11,13 @@ pub mod transport;
 pub mod util;
 pub mod vendor;
 
+// High-level client utilities
+#[cfg(feature = "std")]
+pub mod client;
+
+// Property value decoders
+pub mod property;
+
 // Re-export main types without glob imports to avoid conflicts
 pub use datalink::{DataLink, DataLinkAddress, DataLinkType};
 pub use encoding::{ApplicationTag, EncodingError};
