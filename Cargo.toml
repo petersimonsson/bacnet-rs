@@ -1,6 +1,6 @@
 [package]
 name = "bacnet-rs"
-version = "0.1.3"
+version = "0.2.0"
 edition = "2021"
 authors = ["Tom van Hest <tomvanhest@pm.me>"]
 description = "A complete BACnet protocol stack implementation in Rust"
