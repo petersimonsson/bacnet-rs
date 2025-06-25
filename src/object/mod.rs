@@ -33,11 +33,6 @@
 //! let obj_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
 //! ```
 
-// TODO: Will be needed for object database
-// HashMap is only available with std feature
-// For no-std, consider using BTreeMap or a custom implementation
-// #[cfg(feature = "std")]
-// use std::collections::HashMap;
 
 #[cfg(feature = "std")]
 use std::error::Error;
@@ -356,7 +351,7 @@ impl Device {
             object_type: ObjectType::Device,
             system_status: DeviceStatus::Operational,
             vendor_name: String::from("BACnet-RS"),
-            vendor_identifier: 999, // TODO: Get official vendor ID
+            vendor_identifier: 999, // TODO: Get official vendor ID?
             model_name: String::from("Rust BACnet Device"),
             firmware_revision: String::from("1.0.0"),
             application_software_version: String::from("0.1.0"),
@@ -635,11 +630,17 @@ pub mod binary;
 pub mod multistate;
 /// File object type
 pub mod file;
+/// Object database for managing BACnet objects
+#[cfg(feature = "std")]
+pub mod database;
 
 pub use analog::{AnalogInput, AnalogOutput, AnalogValue, EventState, Reliability, EngineeringUnits};
 pub use binary::{BinaryInput, BinaryOutput, BinaryValue, BinaryPV, Polarity};
 pub use multistate::{MultiStateInput, MultiStateOutput, MultiStateValue};
 pub use file::{File, FileAccessMethod};
+
+#[cfg(feature = "std")]
+pub use database::{ObjectDatabase, DatabaseBuilder, DatabaseStatistics};
 
 #[cfg(test)]
 mod tests {

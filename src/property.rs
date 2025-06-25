@@ -82,7 +82,7 @@ pub fn decode_character_string(data: &[u8]) -> Option<(PropertyValue, usize)> {
     }
 
     // Check for character string application tag (0x75) or context tag
-    let (tag, mut pos) = if data[0] == 0x75 {
+    let (_tag, mut pos) = if data[0] == 0x75 {
         // Application tag with length in next byte
         (0x75, 1)
     } else if (data[0] & 0xF0) == 0x70 {
@@ -160,7 +160,7 @@ pub fn decode_unsigned(data: &[u8]) -> Option<(PropertyValue, usize)> {
     }
 
     // Check for unsigned application tag (0x21, 0x22, 0x23, or 0x24)
-    let (tag, length) = match data[0] {
+    let (_tag, length) = match data[0] {
         0x21 => (0x21, 1), // 1 byte
         0x22 => (0x22, 2), // 2 bytes
         0x23 => (0x23, 3), // 3 bytes
@@ -187,7 +187,7 @@ pub fn decode_signed(data: &[u8]) -> Option<(PropertyValue, usize)> {
     }
 
     // Check for signed application tag (0x31, 0x32, 0x33, or 0x34)
-    let (tag, length) = match data[0] {
+    let (_tag, length) = match data[0] {
         0x31 => (0x31, 1), // 1 byte
         0x32 => (0x32, 2), // 2 bytes
         0x33 => (0x33, 3), // 3 bytes
@@ -214,7 +214,7 @@ pub fn decode_enumerated(data: &[u8]) -> Option<(PropertyValue, usize)> {
     }
 
     // Check for enumerated application tag (0x91, 0x92, 0x93, or 0x94)
-    let (tag, length) = match data[0] {
+    let (_tag, length) = match data[0] {
         0x91 => (0x91, 1), // 1 byte
         0x92 => (0x92, 2), // 2 bytes
         0x93 => (0x93, 3), // 3 bytes

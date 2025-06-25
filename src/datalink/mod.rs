@@ -129,9 +129,20 @@ pub enum DataLinkAddress {
 /// BACnet/IP implementation
 pub mod bip;
 
+/// Ethernet implementation
+pub mod ethernet;
+
+/// MS/TP implementation
+pub mod mstp;
+
+/// Frame validation utilities
+pub mod validation;
+
 #[cfg(feature = "std")]
 pub use bip::BacnetIpDataLink;
 
-// TODO: Implement Ethernet module
-// TODO: Implement MS/TP module
-// TODO: Add frame validation utilities
+#[cfg(feature = "std")]
+pub use ethernet::EthernetDataLink;
+
+#[cfg(feature = "std")]
+pub use mstp::MstpDataLink;

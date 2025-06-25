@@ -24,11 +24,9 @@
 //! let crc = crc16_mstp(data);
 //! ```
 
-// TODO: Will be needed for debug formatting
-// #[cfg(feature = "std")]
-// use std::fmt;
-// #[cfg(not(feature = "std"))]
-// use core::fmt;
+// Debug formatting utilities
+#[cfg(not(feature = "std"))]
+use core::fmt;
 
 #[cfg(not(feature = "std"))]
 use alloc::{format, string::String, vec::Vec};
@@ -618,7 +616,7 @@ pub mod statistics {
 /// Additional utility functions
 
 /// Validate BACnet network number (0-65534, 65535 is broadcast)
-pub fn is_valid_network_number(network: u16) -> bool {
+pub fn is_valid_network_number(_network: u16) -> bool {
     // All u16 values are valid network numbers
     true
 }
@@ -790,6 +788,576 @@ impl<T: Clone> CircularBuffer<T> {
     }
 }
 
+/// Debug formatting utilities for BACnet data structures and protocol analysis
+pub mod debug {
+    use super::*;
+    
+    /// Format a BACnet property value for debugging
+    pub fn format_property_value(data: &[u8]) -> String {
+        if data.is_empty() {
+            return "[empty]".to_string();
+        }
+        
+        let mut result = String::new();
+        let tag = data[0];
+        
+        match tag {
+            0x11 => {
+                // Boolean
+                if data.len() >= 2 {
+                    result.push_str(&format!("Boolean({})", data[1] != 0));
+                } else {
+                    result.push_str("Boolean(invalid)");
+                }
+            }
+            0x21 => {
+                // Unsigned integer
+                result.push_str(&format_unsigned_integer(data));
+            }
+            0x31 => {
+                // Signed integer
+                result.push_str(&format_signed_integer(data));
+            }
+            0x44 => {
+                // Real (float)
+                if data.len() >= 5 {
+                    let bytes = [data[1], data[2], data[3], data[4]];
+                    let value = f32::from_be_bytes(bytes);
+                    result.push_str(&format!("Real({})", value));
+                } else {
+                    result.push_str("Real(invalid)");
+                }
+            }
+            0x55 => {
+                // Double
+                if data.len() >= 9 {
+                    let mut bytes = [0u8; 8];
+                    bytes.copy_from_slice(&data[1..9]);
+                    let value = f64::from_be_bytes(bytes);
+                    result.push_str(&format!("Double({})", value));
+                } else {
+                    result.push_str("Double(invalid)");
+                }
+            }
+            0x75 => {
+                // Character string
+                result.push_str(&format_character_string(data));
+            }
+            0x81..=0x8F => {
+                // Octet string
+                result.push_str(&format_octet_string(data));
+            }
+            0x91 => {
+                // Enumerated
+                result.push_str(&format_enumerated(data));
+            }
+            0xA1 => {
+                // Date
+                result.push_str(&format_date(data));
+            }
+            0xB1 => {
+                // Time
+                result.push_str(&format_time(data));
+            }
+            0xC4 => {
+                // Object identifier
+                result.push_str(&format_object_identifier(data));
+            }
+            _ => {
+                result.push_str(&format!("Unknown(tag=0x{:02X}, data={})", tag, hex_dump(data, "")));
+            }
+        }
+        
+        result
+    }
+    
+    fn format_unsigned_integer(data: &[u8]) -> String {
+        if data.len() < 2 {
+            return "UnsignedInt(invalid)".to_string();
+        }
+        
+        let length = (data[0] & 0x07) as usize;
+        if data.len() < 1 + length {
+            return "UnsignedInt(invalid length)".to_string();
+        }
+        
+        let mut value = 0u64;
+        for i in 0..length {
+            value = (value << 8) | (data[1 + i] as u64);
+        }
+        
+        format!("UnsignedInt({})", value)
+    }
+    
+    fn format_signed_integer(data: &[u8]) -> String {
+        if data.len() < 2 {
+            return "SignedInt(invalid)".to_string();
+        }
+        
+        let length = (data[0] & 0x07) as usize;
+        if data.len() < 1 + length {
+            return "SignedInt(invalid length)".to_string();
+        }
+        
+        let mut value = 0i64;
+        let sign_bit = data[1] & 0x80 != 0;
+        
+        for i in 0..length {
+            value = (value << 8) | (data[1 + i] as i64);
+        }
+        
+        // Sign extend if negative
+        if sign_bit {
+            let shift = 64 - (length * 8);
+            value = (value << shift) >> shift;
+        }
+        
+        format!("SignedInt({})", value)
+    }
+    
+    fn format_character_string(data: &[u8]) -> String {
+        if data.len() < 3 {
+            return "CharString(invalid)".to_string();
+        }
+        
+        let length = data[1] as usize;
+        if data.len() < 2 + length {
+            return "CharString(invalid length)".to_string();
+        }
+        
+        let encoding = data[2];
+        let string_data = &data[3..2 + length];
+        
+        let decoded = match encoding {
+            0 => {
+                // ANSI X3.4 (ASCII)
+                String::from_utf8_lossy(string_data).to_string()
+            }
+            4 => {
+                // UCS-2 (UTF-16)
+                let mut utf16_chars = Vec::new();
+                for chunk in string_data.chunks_exact(2) {
+                    let char_code = u16::from_be_bytes([chunk[0], chunk[1]]);
+                    utf16_chars.push(char_code);
+                }
+                String::from_utf16_lossy(&utf16_chars)
+            }
+            _ => {
+                format!("<encoding={}>", encoding)
+            }
+        };
+        
+        format!("CharString(\"{}\")", decoded)
+    }
+    
+    fn format_octet_string(data: &[u8]) -> String {
+        if data.is_empty() {
+            return "OctetString(invalid)".to_string();
+        }
+        
+        let length = (data[0] & 0x07) as usize;
+        if data.len() < 1 + length {
+            return "OctetString(invalid length)".to_string();
+        }
+        
+        let octets = &data[1..1 + length];
+        let hex_string = octets.iter()
+            .map(|b| format!("{:02X}", b))
+            .collect::<Vec<_>>()
+            .join(" ");
+        
+        format!("OctetString([{}])", hex_string)
+    }
+    
+    fn format_enumerated(data: &[u8]) -> String {
+        if data.len() < 2 {
+            return "Enumerated(invalid)".to_string();
+        }
+        
+        let value = data[1] as u32;
+        format!("Enumerated({})", value)
+    }
+    
+    fn format_date(data: &[u8]) -> String {
+        if data.len() < 5 {
+            return "Date(invalid)".to_string();
+        }
+        
+        let year = data[1] as u16 + 1900;
+        let month = data[2];
+        let day = data[3];
+        let weekday = data[4];
+        
+        format!("Date({})", bacnet_date_to_string(year, month, day, weekday))
+    }
+    
+    fn format_time(data: &[u8]) -> String {
+        if data.len() < 5 {
+            return "Time(invalid)".to_string();
+        }
+        
+        let hour = data[1];
+        let minute = data[2];
+        let second = data[3];
+        let hundredths = data[4];
+        
+        format!("Time({})", bacnet_time_to_string(hour, minute, second, hundredths))
+    }
+    
+    fn format_object_identifier(data: &[u8]) -> String {
+        if data.len() < 5 {
+            return "ObjectID(invalid)".to_string();
+        }
+        
+        let obj_id = u32::from_be_bytes([data[1], data[2], data[3], data[4]]);
+        let (obj_type, instance) = decode_object_id(obj_id);
+        
+        let type_name = match obj_type {
+            0 => "analog-input",
+            1 => "analog-output",
+            2 => "analog-value",
+            3 => "binary-input",
+            4 => "binary-output",
+            5 => "binary-value",
+            6 => "calendar",
+            7 => "command",
+            8 => "device",
+            9 => "event-enrollment",
+            10 => "file",
+            11 => "group",
+            12 => "loop",
+            13 => "multi-state-input",
+            14 => "multi-state-output",
+            15 => "notification-class",
+            16 => "program",
+            17 => "schedule",
+            18 => "averaging",
+            19 => "multi-state-value",
+            20 => "trend-log",
+            21 => "life-safety-point",
+            22 => "life-safety-zone",
+            23 => "accumulator",
+            24 => "pulse-converter",
+            25 => "event-log",
+            26 => "global-group",
+            27 => "trend-log-multiple",
+            28 => "load-control",
+            29 => "structured-view",
+            30 => "access-door",
+            _ => "unknown",
+        };
+        
+        format!("ObjectID({} {})", type_name, instance)
+    }
+    
+    /// Format BACnet service choice for debugging
+    pub fn format_service_choice(service_choice: u8) -> String {
+        let service_name = match service_choice {
+            // Confirmed services
+            0 => "acknowledgeAlarm",
+            1 => "confirmedCOVNotification",
+            2 => "confirmedEventNotification",
+            3 => "getAlarmSummary",
+            4 => "getEnrollmentSummary",
+            5 => "getEventInformation",
+            6 => "atomicReadFile",
+            7 => "atomicWriteFile",
+            8 => "addListElement",
+            9 => "removeListElement",
+            10 => "createObject",
+            11 => "deleteObject",
+            12 => "readProperty",
+            13 => "readPropertyConditional",
+            14 => "readPropertyMultiple",
+            15 => "writeProperty",
+            16 => "writePropertyMultiple",
+            17 => "deviceCommunicationControl",
+            18 => "confirmedPrivateTransfer",
+            19 => "confirmedTextMessage",
+            20 => "reinitializeDevice",
+            21 => "vtOpen",
+            22 => "vtClose",
+            23 => "vtData",
+            24 => "authenticate",
+            25 => "requestKey",
+            26 => "readRange",
+            27 => "lifeSafetyOperation",
+            28 => "subscribeCOV",
+            29 => "subscribeCOVProperty",
+            30 => "getEventInformation",
+            _ => "unknown",
+        };
+        
+        format!("{}({})", service_name, service_choice)
+    }
+    
+    /// Format BACnet error for debugging
+    pub fn format_bacnet_error(error_class: u8, error_code: u8) -> String {
+        let class_name = match error_class {
+            0 => "device",
+            1 => "object",
+            2 => "property",
+            3 => "resources",
+            4 => "security",
+            5 => "services",
+            6 => "vt",
+            7 => "communication",
+            _ => "unknown",
+        };
+        
+        format!("Error({} class, code {})", class_name, error_code)
+    }
+    
+    /// Create a detailed hex dump with annotations
+    pub fn annotated_hex_dump(data: &[u8], annotations: &[(usize, String)]) -> String {
+        let mut result = String::new();
+        let mut annotation_map: std::collections::HashMap<usize, String> = 
+            annotations.iter().cloned().collect();
+        
+        for (i, chunk) in data.chunks(16).enumerate() {
+            let offset = i * 16;
+            result.push_str(&format!("{:04X}: ", offset));
+            
+            // Hex bytes with spacing
+            for (j, byte) in chunk.iter().enumerate() {
+                if j == 8 {
+                    result.push(' ');
+                }
+                result.push_str(&format!("{:02X} ", byte));
+            }
+            
+            // Padding for incomplete lines
+            for j in chunk.len()..16 {
+                if j == 8 {
+                    result.push(' ');
+                }
+                result.push_str("   ");
+            }
+            
+            result.push_str(" |");
+            
+            // ASCII representation
+            for byte in chunk {
+                if byte.is_ascii_graphic() || *byte == b' ' {
+                    result.push(*byte as char);
+                } else {
+                    result.push('.');
+                }
+            }
+            
+            result.push('|');
+            
+            // Check for annotations on this line
+            for pos in offset..offset + chunk.len() {
+                if let Some(annotation) = annotation_map.remove(&pos) {
+                    result.push_str(&format!(" <- {}", annotation));
+                    break;
+                }
+            }
+            
+            result.push('\n');
+        }
+        
+        result
+    }
+    
+    /// Debug formatter for BACnet APDU structure
+    pub fn format_apdu_structure(data: &[u8]) -> String {
+        if data.is_empty() {
+            return "Empty APDU".to_string();
+        }
+        
+        let mut result = String::new();
+        result.push_str("APDU Structure:\n");
+        
+        let pdu_type = (data[0] >> 4) & 0x0F;
+        let pdu_flags = data[0] & 0x0F;
+        
+        result.push_str(&format!("  PDU Type: {} ({})", pdu_type, match pdu_type {
+            0 => "Confirmed-Request",
+            1 => "Unconfirmed-Request", 
+            2 => "Simple-ACK",
+            3 => "Complex-ACK",
+            4 => "Segment-ACK",
+            5 => "Error",
+            6 => "Reject",
+            7 => "Abort",
+            _ => "Reserved",
+        }));
+        
+        result.push_str(&format!("  PDU Flags: 0x{:X}\n", pdu_flags));
+        
+        match pdu_type {
+            0 => {
+                // Confirmed Request
+                if data.len() >= 4 {
+                    result.push_str(&format!("  Max Segments: {}\n", (pdu_flags >> 1) & 0x07));
+                    result.push_str(&format!("  Max APDU: {}\n", (pdu_flags & 0x01) | ((data[1] & 0xF0) >> 3)));
+                    result.push_str(&format!("  Invoke ID: {}\n", data[1] & 0x0F));
+                    if data.len() > 2 {
+                        result.push_str(&format!("  Service Choice: {}\n", format_service_choice(data[2])));
+                    }
+                }
+            }
+            1 => {
+                // Unconfirmed Request
+                if data.len() >= 2 {
+                    result.push_str(&format!("  Service Choice: {}\n", format_service_choice(data[1])));
+                }
+            }
+            3 => {
+                // Complex ACK
+                if data.len() >= 3 {
+                    result.push_str(&format!("  Invoke ID: {}\n", data[1]));
+                    result.push_str(&format!("  Service Choice: {}\n", format_service_choice(data[2])));
+                }
+            }
+            5 => {
+                // Error
+                if data.len() >= 4 {
+                    result.push_str(&format!("  Invoke ID: {}\n", data[1]));
+                    result.push_str(&format!("  Service Choice: {}\n", format_service_choice(data[2])));
+                    result.push_str(&format!("  Error: {}\n", format_bacnet_error(data[3], data[4])));
+                }
+            }
+            _ => {
+                result.push_str(&format!("  Raw data: {}\n", hex_dump(&data[1..], "    ")));
+            }
+        }
+        
+        result
+    }
+    
+    /// Debug formatter for network layer (NPDU)
+    pub fn format_npdu_structure(data: &[u8]) -> String {
+        if data.is_empty() {
+            return "Empty NPDU".to_string();
+        }
+        
+        let mut result = String::new();
+        result.push_str("NPDU Structure:\n");
+        
+        let version = data[0];
+        result.push_str(&format!("  Version: {}\n", version));
+        
+        if data.len() < 2 {
+            return result;
+        }
+        
+        let control = data[1];
+        result.push_str(&format!("  Control: 0x{:02X}\n", control));
+        
+        let has_dest = (control & 0x20) != 0;
+        let has_src = (control & 0x08) != 0;
+        let expecting_reply = (control & 0x04) != 0;
+        let priority = control & 0x03;
+        
+        result.push_str(&format!("    Destination Present: {}\n", has_dest));
+        result.push_str(&format!("    Source Present: {}\n", has_src));
+        result.push_str(&format!("    Expecting Reply: {}\n", expecting_reply));
+        result.push_str(&format!("    Priority: {} ({})\n", priority, match priority {
+            0 => "Normal",
+            1 => "Urgent",
+            2 => "Critical",
+            3 => "Life Safety",
+            _ => "Unknown",
+        }));
+        
+        let mut pos = 2;
+        
+        if has_dest && data.len() > pos + 2 {
+            let dest_net = u16::from_be_bytes([data[pos], data[pos + 1]]);
+            pos += 2;
+            result.push_str(&format!("  Destination Network: {}\n", dest_net));
+            
+            if data.len() > pos {
+                let dest_len = data[pos] as usize;
+                pos += 1;
+                if data.len() >= pos + dest_len {
+                    let dest_addr = &data[pos..pos + dest_len];
+                    pos += dest_len;
+                    result.push_str(&format!("  Destination Address: {:02X?}\n", dest_addr));
+                }
+            }
+        }
+        
+        if has_src && data.len() > pos + 2 {
+            let src_net = u16::from_be_bytes([data[pos], data[pos + 1]]);
+            pos += 2;
+            result.push_str(&format!("  Source Network: {}\n", src_net));
+            
+            if data.len() > pos {
+                let src_len = data[pos] as usize;
+                pos += 1;
+                if data.len() >= pos + src_len {
+                    let src_addr = &data[pos..pos + src_len];
+                    pos += src_len;
+                    result.push_str(&format!("  Source Address: {:02X?}\n", src_addr));
+                }
+            }
+        }
+        
+        if data.len() > pos {
+            result.push_str(&format!("  Hop Count: {}\n", data[pos]));
+            pos += 1;
+        }
+        
+        if data.len() > pos {
+            result.push_str(&format!("  APDU Length: {} bytes\n", data.len() - pos));
+        }
+        
+        result
+    }
+    
+    /// Debug formatter for BVLL (BACnet Virtual Link Layer)
+    pub fn format_bvll_structure(data: &[u8]) -> String {
+        if data.len() < 4 {
+            return "Invalid BVLL (too short)".to_string();
+        }
+        
+        let mut result = String::new();
+        result.push_str("BVLL Structure:\n");
+        
+        let bvll_type = data[0];
+        let function = data[1];
+        let length = u16::from_be_bytes([data[2], data[3]]);
+        
+        result.push_str(&format!("  Type: 0x{:02X} ({})\n", bvll_type, match bvll_type {
+            0x81 => "BACnet/IP",
+            _ => "Unknown",
+        }));
+        
+        result.push_str(&format!("  Function: 0x{:02X} ({})\n", function, match function {
+            0x00 => "Result",
+            0x01 => "Write-BDT",
+            0x02 => "Read-BDT",
+            0x03 => "Read-BDT-Ack",
+            0x04 => "Forwarded-NPDU",
+            0x05 => "Register-Foreign-Device",
+            0x06 => "Read-FDT",
+            0x07 => "Read-FDT-Ack",
+            0x08 => "Delete-FDT-Entry",
+            0x09 => "Distribute-Broadcast-To-Network",
+            0x0A => "Original-Unicast-NPDU",
+            0x0B => "Original-Broadcast-NPDU",
+            0x0C => "Secure-BVLL",
+            _ => "Unknown",
+        }));
+        
+        result.push_str(&format!("  Length: {} bytes\n", length));
+        
+        if data.len() != length as usize {
+            result.push_str(&format!("  WARNING: Actual length {} bytes\n", data.len()));
+        }
+        
+        if data.len() > 4 {
+            result.push_str(&format!("  Data Length: {} bytes\n", data.len() - 4));
+        }
+        
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -884,5 +1452,36 @@ mod tests {
         assert_eq!(metrics.count, 1);
         assert!(metrics.last_duration_ms >= 10.0);
         assert_eq!(metrics.min_duration_ms, metrics.max_duration_ms);
+    }
+    
+    #[test]
+    fn test_debug_formatting() {
+        // Test property value formatting
+        let boolean_data = &[0x11, 0x01]; // Boolean true
+        let formatted = debug::format_property_value(boolean_data);
+        assert!(formatted.contains("Boolean(true)"));
+        
+        let real_data = &[0x44, 0x42, 0x28, 0x00, 0x00]; // Real 42.0
+        let formatted = debug::format_property_value(real_data);
+        assert!(formatted.contains("Real(42)"));
+        
+        // Test service choice formatting
+        let formatted = debug::format_service_choice(12);
+        assert!(formatted.contains("readProperty"));
+        
+        // Test error formatting
+        let formatted = debug::format_bacnet_error(1, 2);
+        assert!(formatted.contains("object"));
+    }
+    
+    #[test]
+    fn test_annotated_hex_dump() {
+        let data = &[0x01, 0x02, 0x03, 0x04];
+        let annotations = vec![(0, "Start".to_string()), (2, "Middle".to_string())];
+        let result = debug::annotated_hex_dump(data, &annotations);
+        
+        assert!(result.contains("0000:"));
+        assert!(result.contains("01 02 03 04"));
+        assert!(result.contains("Start") || result.contains("Middle"));
     }
 }
