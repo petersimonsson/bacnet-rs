@@ -21,7 +21,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bacnet-rs = "0.1"
+bacnet-rs = "0.2"
 ```
 
 ## Architecture
