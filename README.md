@@ -4,7 +4,7 @@ A comprehensive BACnet (Building Automation and Control Networks) protocol stack
 
 ## Overview
 
-This library provides a complete, production-ready implementation of the BACnet protocol stack in Rust, designed as a modern alternative to the official C BACnet stack. It supports multiple data link layers, all standard BACnet services, and is suitable for both embedded and desktop applications.
+This library provides a complete implementation of the BACnet protocol stack in Rust, designed as a modern alternative to the official C BACnet stack. It supports multiple data link layers, all standard BACnet services, and is suitable for both embedded and desktop applications.
 
 ## Features
 
