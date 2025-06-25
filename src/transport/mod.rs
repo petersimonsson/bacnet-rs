@@ -40,6 +40,7 @@ use std::{
     fmt,
     net::{IpAddr, SocketAddr},
     time::Instant,
+    collections::HashMap,
 };
 
 #[cfg(not(feature = "std"))]
@@ -48,11 +49,10 @@ use core::fmt;
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
 
-// TODO: Will be needed for timeouts
-// #[cfg(feature = "std")]
-// use std::time::Duration;
-// #[cfg(not(feature = "std"))]
-// use core::time::Duration;
+#[cfg(feature = "std")]
+use std::time::Duration;
+#[cfg(not(feature = "std"))]
+use core::time::Duration;
 
 /// Result type for transport operations
 #[cfg(feature = "std")]
@@ -75,6 +75,10 @@ pub enum TransportError {
     NotConnected,
     /// Invalid transport configuration
     InvalidConfiguration(String),
+    /// Request timeout
+    Timeout(String),
+    /// Request not found
+    RequestNotFound(u8),
 }
 
 impl fmt::Display for TransportError {
@@ -87,6 +91,10 @@ impl fmt::Display for TransportError {
             TransportError::NotConnected => write!(f, "Transport not connected"),
             TransportError::InvalidConfiguration(msg) => {
                 write!(f, "Invalid configuration: {}", msg)
+            }
+            TransportError::Timeout(msg) => write!(f, "Timeout: {}", msg),
+            TransportError::RequestNotFound(invoke_id) => {
+                write!(f, "Request not found: invoke ID {}", invoke_id)
             }
         }
     }
@@ -186,6 +194,18 @@ pub trait Transport: Send + Sync {
     /// Receive data with source address
     fn receive(&mut self) -> Result<(Vec<u8>, SocketAddr)>;
 
+    /// Receive data with timeout
+    fn receive_timeout(&mut self, timeout: Duration) -> Result<(Vec<u8>, SocketAddr)>;
+
+    /// Send confirmed request with timeout tracking
+    fn send_confirmed_request(&mut self, dest: SocketAddr, data: &[u8], timeout: Option<Duration>) -> Result<u8>;
+
+    /// Check for timed out requests
+    fn check_timeouts(&mut self) -> Vec<u8>;
+
+    /// Complete a request (remove from timeout tracking)
+    fn complete_request(&mut self, invoke_id: u8) -> Option<Duration>;
+
     /// Get local address
     fn local_address(&self) -> Result<SocketAddr>;
 
@@ -207,6 +227,14 @@ pub struct BacnetIpConfig {
     pub bdt: Vec<BdtEntry>,
     /// Receive buffer size
     pub buffer_size: usize,
+    /// Socket read timeout
+    pub read_timeout: Option<Duration>,
+    /// Socket write timeout
+    pub write_timeout: Option<Duration>,
+    /// Request timeout for confirmed services
+    pub request_timeout: Duration,
+    /// Foreign device registration timeout
+    pub registration_timeout: Duration,
 }
 
 #[cfg(feature = "std")]
@@ -218,12 +246,18 @@ impl Default for BacnetIpConfig {
             foreign_device: None,
             bdt: Vec::new(),
             buffer_size: 1500,
+            read_timeout: Some(Duration::from_secs(5)),
+            write_timeout: Some(Duration::from_secs(5)),
+            request_timeout: Duration::from_secs(10),
+            registration_timeout: Duration::from_secs(30),
         }
     }
 }
 
 /// BACnet/IP specific constants
 pub mod constants {
+    use super::Duration;
+    
     /// Default BACnet/IP UDP port
     pub const BACNET_IP_PORT: u16 = 0xBAC0; // 47808
 
@@ -235,6 +269,21 @@ pub mod constants {
 
     /// Default foreign device TTL (seconds)
     pub const DEFAULT_FD_TTL: u16 = 900; // 15 minutes
+    
+    /// Default request timeout
+    pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+    
+    /// Default socket read timeout
+    pub const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(5);
+    
+    /// Default socket write timeout
+    pub const DEFAULT_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+    
+    /// Default foreign device registration timeout
+    pub const DEFAULT_REGISTRATION_TIMEOUT: Duration = Duration::from_secs(30);
+    
+    /// Maximum number of concurrent requests
+    pub const MAX_CONCURRENT_REQUESTS: usize = 255;
 }
 
 impl BvllHeader {
@@ -342,6 +391,97 @@ impl BvllMessage {
 #[cfg(feature = "std")]
 use std::net::UdpSocket;
 
+/// Timeout manager for handling request timeouts
+#[cfg(feature = "std")]
+#[derive(Debug)]
+pub struct TimeoutManager {
+    /// Active timeouts keyed by invoke ID
+    timeouts: HashMap<u8, (Instant, Duration)>,
+    /// Next available invoke ID
+    next_invoke_id: u8,
+}
+
+#[cfg(feature = "std")]
+impl TimeoutManager {
+    /// Create new timeout manager
+    pub fn new() -> Self {
+        Self {
+            timeouts: HashMap::new(),
+            next_invoke_id: 1,
+        }
+    }
+
+    /// Start tracking a new request
+    pub fn start_request(&mut self, timeout: Duration) -> u8 {
+        let invoke_id = self.next_invoke_id;
+        self.next_invoke_id = self.next_invoke_id.wrapping_add(1);
+        if self.next_invoke_id == 0 {
+            self.next_invoke_id = 1; // Skip 0 as it's often reserved
+        }
+
+        self.timeouts.insert(invoke_id, (Instant::now(), timeout));
+        invoke_id
+    }
+
+    /// Complete a request
+    pub fn complete_request(&mut self, invoke_id: u8) -> Option<Duration> {
+        self.timeouts.remove(&invoke_id).map(|(start_time, _)| {
+            start_time.elapsed()
+        })
+    }
+
+    /// Check for timed out requests
+    pub fn check_timeouts(&mut self) -> Vec<u8> {
+        let mut timed_out = Vec::new();
+        let now = Instant::now();
+
+        self.timeouts.retain(|&invoke_id, (start_time, timeout)| {
+            if now.duration_since(*start_time) > *timeout {
+                timed_out.push(invoke_id);
+                false
+            } else {
+                true
+            }
+        });
+
+        timed_out
+    }
+
+    /// Get number of active requests
+    pub fn active_count(&self) -> usize {
+        self.timeouts.len()
+    }
+
+    /// Get remaining time for a request
+    pub fn remaining_time(&self, invoke_id: u8) -> Option<Duration> {
+        self.timeouts.get(&invoke_id).map(|(start_time, timeout)| {
+            let elapsed = start_time.elapsed();
+            if elapsed < *timeout {
+                *timeout - elapsed
+            } else {
+                Duration::from_secs(0)
+            }
+        })
+    }
+
+    /// Clear all timeouts
+    pub fn clear(&mut self) {
+        self.timeouts.clear();
+    }
+
+    /// Get all active invoke IDs
+    pub fn active_invoke_ids(&self) -> Vec<u8> {
+        self.timeouts.keys().copied().collect()
+    }
+}
+
+#[cfg(feature = "std")]
+impl Default for TimeoutManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// BACnet/IP transport implementation
 #[cfg(feature = "std")]
 pub struct BacnetIpTransport {
@@ -351,6 +491,10 @@ pub struct BacnetIpTransport {
     config: BacnetIpConfig,
     /// Receive buffer
     buffer: Vec<u8>,
+    /// Active request timeouts
+    active_requests: std::collections::HashMap<u8, (Instant, Duration)>,
+    /// Next invoke ID for confirmed requests
+    next_invoke_id: u8,
 }
 
 #[cfg(feature = "std")]
@@ -364,12 +508,18 @@ impl BacnetIpTransport {
             socket.set_broadcast(true)?;
         }
 
+        // Set socket timeouts
+        socket.set_read_timeout(config.read_timeout)?;
+        socket.set_write_timeout(config.write_timeout)?;
+
         let buffer = vec![0u8; config.buffer_size];
 
         Ok(Self {
             socket,
             config,
             buffer,
+            active_requests: HashMap::new(),
+            next_invoke_id: 1,
         })
     }
 
@@ -407,6 +557,20 @@ impl BacnetIpTransport {
         Ok((message, src))
     }
 
+    /// Receive a BVLL message with custom timeout
+    pub fn receive_bvll_timeout(&mut self, timeout: Duration) -> Result<(BvllMessage, SocketAddr)> {
+        // Temporarily set socket timeout
+        let original_timeout = self.socket.read_timeout()?;
+        self.socket.set_read_timeout(Some(timeout))?;
+        
+        let result = self.receive_bvll();
+        
+        // Restore original timeout
+        self.socket.set_read_timeout(original_timeout)?;
+        
+        result
+    }
+
     /// Register as foreign device with BBMD
     pub fn register_foreign_device(&mut self, bbmd_addr: SocketAddr, ttl: u16) -> Result<()> {
         let mut data = Vec::new();
@@ -415,7 +579,31 @@ impl BacnetIpTransport {
         let message = BvllMessage::new(BvllFunction::RegisterForeignDevice, data);
         self.send_bvll(message, bbmd_addr)?;
 
-        // Update foreign device registration
+        // Wait for registration confirmation with timeout
+        let start_time = Instant::now();
+        while start_time.elapsed() < self.config.registration_timeout {
+            if let Ok((response, src)) = self.receive_bvll_timeout(Duration::from_millis(100)) {
+                if src == bbmd_addr && response.header.function == BvllFunction::Result {
+                    // Check result code
+                    if !response.data.is_empty() {
+                        let result_code = u16::from_be_bytes([response.data[0], response.data[1]]);
+                        if result_code == 0 {
+                            // Registration successful
+                            self.config.foreign_device = Some(ForeignDeviceRegistration {
+                                bbmd_address: bbmd_addr,
+                                ttl,
+                                last_registration: Instant::now(),
+                            });
+                            return Ok(());
+                        } else {
+                            return Err(TransportError::RegistrationFailed);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Timeout - assume success for compatibility
         self.config.foreign_device = Some(ForeignDeviceRegistration {
             bbmd_address: bbmd_addr,
             ttl,
@@ -451,8 +639,82 @@ impl BacnetIpTransport {
             ));
         }
         
+        // Update socket timeouts if they changed
+        if config.read_timeout != self.config.read_timeout {
+            self.socket.set_read_timeout(config.read_timeout)?;
+        }
+        if config.write_timeout != self.config.write_timeout {
+            self.socket.set_write_timeout(config.write_timeout)?;
+        }
+        
         self.config = config;
         Ok(())
+    }
+
+    /// Send confirmed request with timeout tracking
+    pub fn send_confirmed_request(&mut self, dest: SocketAddr, data: &[u8], timeout: Option<Duration>) -> Result<u8> {
+        let invoke_id = self.next_invoke_id;
+        self.next_invoke_id = self.next_invoke_id.wrapping_add(1);
+        if self.next_invoke_id == 0 {
+            self.next_invoke_id = 1; // Skip 0 as it's often reserved
+        }
+
+        let request_timeout = timeout.unwrap_or(self.config.request_timeout);
+        self.active_requests.insert(invoke_id, (Instant::now(), request_timeout));
+
+        // Send the request
+        self.send_npdu_unicast(data, dest)?;
+
+        Ok(invoke_id)
+    }
+
+    /// Check for timed out requests
+    pub fn check_timeouts(&mut self) -> Vec<u8> {
+        let mut timed_out = Vec::new();
+        let now = Instant::now();
+
+        self.active_requests.retain(|&invoke_id, (start_time, timeout)| {
+            if now.duration_since(*start_time) > *timeout {
+                timed_out.push(invoke_id);
+                false // Remove from active requests
+            } else {
+                true // Keep in active requests
+            }
+        });
+
+        timed_out
+    }
+
+    /// Complete a request (remove from timeout tracking)
+    pub fn complete_request(&mut self, invoke_id: u8) -> Option<Duration> {
+        self.active_requests.remove(&invoke_id).map(|(start_time, _)| {
+            start_time.elapsed()
+        })
+    }
+
+    /// Get active request count
+    pub fn active_request_count(&self) -> usize {
+        self.active_requests.len()
+    }
+
+    /// Get requests by remaining time
+    pub fn get_requests_by_remaining_time(&self) -> Vec<(u8, Duration)> {
+        let now = Instant::now();
+        let mut requests: Vec<(u8, Duration)> = self.active_requests
+            .iter()
+            .filter_map(|(&invoke_id, (start_time, timeout))| {
+                let elapsed = now.duration_since(*start_time);
+                if elapsed < *timeout {
+                    Some((invoke_id, *timeout - elapsed))
+                } else {
+                    Some((invoke_id, Duration::from_secs(0)))
+                }
+            })
+            .collect();
+        
+        // Sort by remaining time (shortest first)
+        requests.sort_by_key(|(_, remaining)| *remaining);
+        requests
     }
 }
 
@@ -465,6 +727,23 @@ impl Transport for BacnetIpTransport {
     fn receive(&mut self) -> Result<(Vec<u8>, SocketAddr)> {
         let (message, src) = self.receive_bvll()?;
         Ok((message.data, src))
+    }
+
+    fn receive_timeout(&mut self, timeout: Duration) -> Result<(Vec<u8>, SocketAddr)> {
+        let (message, src) = self.receive_bvll_timeout(timeout)?;
+        Ok((message.data, src))
+    }
+
+    fn send_confirmed_request(&mut self, dest: SocketAddr, data: &[u8], timeout: Option<Duration>) -> Result<u8> {
+        self.send_confirmed_request(dest, data, timeout)
+    }
+
+    fn check_timeouts(&mut self) -> Vec<u8> {
+        self.check_timeouts()
+    }
+
+    fn complete_request(&mut self, invoke_id: u8) -> Option<Duration> {
+        self.complete_request(invoke_id)
     }
 
     fn local_address(&self) -> Result<SocketAddr> {
@@ -559,6 +838,151 @@ impl BroadcastManager {
         }
 
         Ok(())
+    }
+}
+
+/// Timeout configuration for different operation types
+#[cfg(feature = "std")]
+#[derive(Debug, Clone)]
+pub struct TimeoutConfig {
+    /// Socket read operations
+    pub read_timeout: Duration,
+    /// Socket write operations  
+    pub write_timeout: Duration,
+    /// Confirmed service requests
+    pub request_timeout: Duration,
+    /// Foreign device registration
+    pub registration_timeout: Duration,
+    /// Device discovery (Who-Is)
+    pub discovery_timeout: Duration,
+    /// Property read operations
+    pub property_read_timeout: Duration,
+    /// File transfer operations
+    pub file_transfer_timeout: Duration,
+}
+
+#[cfg(feature = "std")]
+impl Default for TimeoutConfig {
+    fn default() -> Self {
+        Self {
+            read_timeout: Duration::from_secs(5),
+            write_timeout: Duration::from_secs(5),
+            request_timeout: Duration::from_secs(10),
+            registration_timeout: Duration::from_secs(30),
+            discovery_timeout: Duration::from_secs(3),
+            property_read_timeout: Duration::from_secs(5),
+            file_transfer_timeout: Duration::from_secs(60),
+        }
+    }
+}
+
+/// Timeout utilities for BACnet operations
+#[cfg(feature = "std")]
+pub mod timeout_utils {
+    use super::*;
+    
+    /// Wait for a condition with timeout
+    pub fn wait_for_condition<F>(
+        condition: F,
+        timeout: Duration,
+        check_interval: Duration,
+    ) -> Result<()>
+    where
+        F: Fn() -> bool,
+    {
+        let start = Instant::now();
+        
+        while start.elapsed() < timeout {
+            if condition() {
+                return Ok(());
+            }
+            
+            std::thread::sleep(check_interval);
+        }
+        
+        Err(TransportError::Timeout("Condition not met within timeout".into()))
+    }
+    
+    /// Execute operation with retry and exponential backoff
+    pub fn retry_with_backoff<F, T, E>(
+        mut operation: F,
+        max_attempts: u32,
+        initial_delay: Duration,
+        max_delay: Duration,
+        backoff_multiplier: f64,
+    ) -> std::result::Result<T, E>
+    where
+        F: FnMut() -> std::result::Result<T, E>,
+    {
+        let mut delay = initial_delay;
+        
+        for attempt in 0..max_attempts {
+            match operation() {
+                Ok(result) => return Ok(result),
+                Err(e) if attempt == max_attempts - 1 => return Err(e),
+                Err(_) => {
+                    std::thread::sleep(delay);
+                    delay = std::cmp::min(
+                        Duration::from_millis((delay.as_millis() as f64 * backoff_multiplier) as u64),
+                        max_delay,
+                    );
+                }
+            }
+        }
+        
+        unreachable!()
+    }
+    
+    /// Create timeout-aware operation
+    pub fn with_timeout<F, T>(
+        operation: F,
+        timeout: Duration,
+    ) -> Result<T>
+    where
+        F: FnOnce() -> Result<T>,
+    {
+        let start = Instant::now();
+        let result = operation();
+        
+        if start.elapsed() > timeout {
+            Err(TransportError::Timeout(format!(
+                "Operation took {:.2}s, timeout was {:.2}s",
+                start.elapsed().as_secs_f64(),
+                timeout.as_secs_f64()
+            )))
+        } else {
+            result
+        }
+    }
+    
+    /// Calculate adaptive timeout based on historical performance
+    pub fn calculate_adaptive_timeout(
+        recent_times: &[Duration],
+        base_timeout: Duration,
+        safety_factor: f64,
+    ) -> Duration {
+        if recent_times.is_empty() {
+            return base_timeout;
+        }
+        
+        // Calculate average and standard deviation
+        let avg = recent_times.iter().sum::<Duration>() / recent_times.len() as u32;
+        
+        let variance: f64 = recent_times
+            .iter()
+            .map(|t| {
+                let diff = t.as_secs_f64() - avg.as_secs_f64();
+                diff * diff
+            })
+            .sum::<f64>() / recent_times.len() as f64;
+        
+        let std_dev = variance.sqrt();
+        
+        // Use average + (safety_factor * std_dev), but at least base_timeout
+        let adaptive_secs = avg.as_secs_f64() + (safety_factor * std_dev);
+        let adaptive_timeout = Duration::from_secs_f64(adaptive_secs);
+        
+        std::cmp::max(adaptive_timeout, base_timeout)
     }
 }
 
@@ -707,6 +1131,10 @@ mod tests {
         assert!(config.broadcast_enabled);
         assert!(config.foreign_device.is_none());
         assert_eq!(config.buffer_size, 1500);
+        assert_eq!(config.read_timeout, Some(constants::DEFAULT_READ_TIMEOUT));
+        assert_eq!(config.write_timeout, Some(constants::DEFAULT_WRITE_TIMEOUT));
+        assert_eq!(config.request_timeout, constants::DEFAULT_REQUEST_TIMEOUT);
+        assert_eq!(config.registration_timeout, constants::DEFAULT_REGISTRATION_TIMEOUT);
     }
     
     #[test]
@@ -722,5 +1150,40 @@ mod tests {
         // Test invalid function code
         let invalid_function = [0x81, 0xFF, 0x00, 0x04];
         assert!(BvllHeader::decode(&invalid_function).is_err());
+    }
+    
+    #[cfg(feature = "std")]
+    #[test]
+    fn test_timeout_tracking() {
+        let config = BacnetIpConfig::default();
+        let mut transport = BacnetIpTransport::new(config).unwrap();
+        
+        // Test invoke ID generation
+        let target = "127.0.0.1:47808".parse().unwrap();
+        let data = &[0x01, 0x02, 0x03];
+        
+        let invoke_id1 = transport.send_confirmed_request(target, data, None).unwrap();
+        let invoke_id2 = transport.send_confirmed_request(target, data, None).unwrap();
+        
+        assert_ne!(invoke_id1, invoke_id2);
+        assert_eq!(transport.active_request_count(), 2);
+        
+        // Test request completion
+        let elapsed = transport.complete_request(invoke_id1);
+        assert!(elapsed.is_some());
+        assert_eq!(transport.active_request_count(), 1);
+        
+        // Test completing non-existent request
+        let elapsed = transport.complete_request(255);
+        assert!(elapsed.is_none());
+    }
+    
+    #[test]
+    fn test_timeout_constants() {
+        assert_eq!(constants::DEFAULT_REQUEST_TIMEOUT.as_secs(), 10);
+        assert_eq!(constants::DEFAULT_READ_TIMEOUT.as_secs(), 5);
+        assert_eq!(constants::DEFAULT_WRITE_TIMEOUT.as_secs(), 5);
+        assert_eq!(constants::DEFAULT_REGISTRATION_TIMEOUT.as_secs(), 30);
+        assert_eq!(constants::MAX_CONCURRENT_REQUESTS, 255);
     }
 }

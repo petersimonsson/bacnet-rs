@@ -27,6 +27,32 @@ cargo run --example debugging/debug_properties
 - Protocol troubleshooting techniques
 - Error detection and diagnosis
 
+---
+
+### `debug_formatter.rs`
+**Purpose**: Comprehensive debug formatting for BACnet data structures
+
+**Features**:
+- **Property Value Formatting**: Human-readable display of all BACnet data types
+- **Service Choice Display**: Named service identification and formatting
+- **Error Code Translation**: BACnet error class and code interpretation
+- **Protocol Structure Analysis**: BVLL, NPDU, and APDU layer breakdown
+- **Annotated Hex Dumps**: Hex dumps with field annotations and explanations
+- **Complete Packet Analysis**: End-to-end packet structure visualization
+
+**Usage**:
+```bash
+cargo run --example debugging/debug_formatter
+```
+
+**What it demonstrates**:
+- Production-ready debug formatting utilities
+- Protocol layer analysis and visualization
+- Human-readable data type interpretation
+- Complete packet structure breakdown
+- Error and service code translation
+- Advanced debugging and analysis techniques
+
 ## Debugging Architecture
 
 ### Debug Information Flow

@@ -76,6 +76,11 @@ name = "transport_demo"
 path = "examples/networking/transport_demo.rs"
 required-features = ["std"]
 
+[[example]]
+name = "timeout_demo"
+path = "examples/networking/timeout_demo.rs"
+required-features = ["std"]
+
 # Object examples
 [[example]]
 name = "device_objects"
@@ -108,6 +113,11 @@ required-features = ["std"]
 [[example]]
 name = "debug_properties"
 path = "examples/debugging/debug_properties.rs"
+required-features = ["std"]
+
+[[example]]
+name = "debug_formatter"
+path = "examples/debugging/debug_formatter.rs"
 required-features = ["std"]
 
 [[bench]]

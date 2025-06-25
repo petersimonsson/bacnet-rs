@@ -50,6 +50,32 @@ cargo run --example networking/transport_demo
 - Broadcast management mechanisms
 - Transport protocol internals
 
+---
+
+### `timeout_demo.rs`
+**Purpose**: Comprehensive timeout handling for reliable BACnet communication
+
+**Features**:
+- **Socket Timeouts**: Read/write timeout configuration and testing
+- **Request Tracking**: Confirmed service timeout management with invoke ID tracking
+- **Adaptive Timeouts**: Dynamic timeout calculation based on network performance
+- **Retry Logic**: Exponential backoff with configurable parameters
+- **Timeout Monitoring**: Statistics collection and performance analysis
+- **Condition Waiting**: Timeout-aware condition checking utilities
+
+**Usage**:
+```bash
+cargo run --example networking/timeout_demo
+```
+
+**What it demonstrates**:
+- Production-ready timeout management strategies
+- Network performance adaptation techniques
+- Robust error recovery with exponential backoff
+- Request lifecycle tracking and monitoring
+- Timeout statistics and diagnostics
+- Real-world timeout handling patterns
+
 ## Network Architecture
 
 ### BACnet/IP Components
