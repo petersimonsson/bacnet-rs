@@ -351,7 +351,7 @@ impl Device {
             object_type: ObjectType::Device,
             system_status: DeviceStatus::Operational,
             vendor_name: String::from("BACnet-RS"),
-            vendor_identifier: 999, // TODO: Get official vendor ID
+            vendor_identifier: 999, // TODO: Get official vendor ID?
             model_name: String::from("Rust BACnet Device"),
             firmware_revision: String::from("1.0.0"),
             application_software_version: String::from("0.1.0"),

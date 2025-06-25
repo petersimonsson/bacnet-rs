@@ -25,8 +25,6 @@
 //! ```
 
 // Debug formatting utilities
-#[cfg(feature = "std")]
-use std::fmt;
 #[cfg(not(feature = "std"))]
 use core::fmt;
 
