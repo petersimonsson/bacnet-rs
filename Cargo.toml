@@ -49,24 +49,65 @@ std = ["chrono/std"]
 async = ["tokio", "async-trait"]
 no-std = []
 
+# Basic examples
 [[example]]
 name = "simple_device"
+path = "examples/basic/simple_device.rs"
 required-features = ["std"]
 
 [[example]]
 name = "advanced_device"
-required-features = ["std"]
-
-[[example]]
-name = "whois_scan"
+path = "examples/basic/advanced_device.rs"
 required-features = ["std"]
 
 [[example]]
 name = "responder_device"
+path = "examples/basic/responder_device.rs"
+required-features = ["std"]
+
+# Networking examples
+[[example]]
+name = "whois_scan"
+path = "examples/networking/whois_scan.rs"
 required-features = ["std"]
 
 [[example]]
+name = "transport_demo"
+path = "examples/networking/transport_demo.rs"
+required-features = ["std"]
+
+# Object examples
+[[example]]
 name = "device_objects"
+path = "examples/objects/device_objects.rs"
+required-features = ["std"]
+
+[[example]]
+name = "object_database"
+path = "examples/objects/object_database.rs"
+required-features = ["std"]
+
+# Communication examples
+[[example]]
+name = "test_client"
+path = "examples/communication/test_client.rs"
+required-features = ["std"]
+
+# Utility examples
+[[example]]
+name = "util_demo"
+path = "examples/utilities/util_demo.rs"
+required-features = ["std"]
+
+[[example]]
+name = "vendor_lookup"
+path = "examples/utilities/vendor_lookup.rs"
+required-features = ["std"]
+
+# Debugging examples
+[[example]]
+name = "debug_properties"
+path = "examples/debugging/debug_properties.rs"
 required-features = ["std"]
 
 [[bench]]
