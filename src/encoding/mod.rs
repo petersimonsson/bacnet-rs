@@ -1,27 +1,133 @@
-//! BACnet Encoding/Decoding Module
+//! BACnet Encoding and Decoding Utilities
 //!
-//! This module provides functionality for encoding and decoding BACnet protocol data.
-//! It handles the serialization and deserialization of BACnet data types according
-//! to the ASHRAE 135 standard.
+//! This module provides comprehensive functionality for encoding and decoding BACnet protocol data
+//! according to ASHRAE Standard 135. It handles the serialization and deserialization of all
+//! BACnet data types, application tags, and protocol structures.
 //!
 //! # Overview
 //!
-//! The encoding module is responsible for:
-//! - Converting BACnet data types to/from wire format
-//! - Handling primitive data types (Boolean, Integer, Real, etc.)
-//! - Encoding/decoding constructed data types
-//! - Managing BACnet application tags
-//! - Context-specific encoding/decoding
+//! The BACnet encoding system uses a tag-length-value (TLV) format where each data element
+//! consists of:
 //!
-//! # Example
+//! - **Tag**: Identifies the data type and context
+//! - **Length**: Specifies the length of the value (for variable-length types)
+//! - **Value**: The actual data content
 //!
-//! ```no_run
-//! use bacnet_rs::encoding::*;
+//! This module provides functionality for:
 //!
-//! // Example of encoding a value
-//! let mut buffer: Vec<u8> = Vec::new();
-//! // encode_application_unsigned(&mut buffer, 42)?;
+//! - **Primitive Types**: Boolean, Unsigned/Signed integers, Real numbers, Double precision, etc.
+//! - **String Types**: Character strings, Bit strings, Octet strings
+//! - **Time Types**: Date, Time, DateTime values
+//! - **Object Types**: Object identifiers, Property identifiers
+//! - **Constructed Types**: Arrays, Lists, Sequences
+//! - **Context Tags**: Application-specific encoding contexts
+//!
+//! # Application Tags
+//!
+//! BACnet defines standard application tags for common data types:
+//!
+//! | Tag | Type | Description |
+//! |-----|------|-------------|
+//! | 0 | Null | No value |
+//! | 1 | Boolean | True/False |
+//! | 2 | Unsigned Integer | 8, 16, 24, or 32-bit unsigned |
+//! | 3 | Signed Integer | 8, 16, 24, or 32-bit signed |
+//! | 4 | Real | 32-bit IEEE 754 float |
+//! | 5 | Double | 64-bit IEEE 754 double |
+//! | 6 | Octet String | Arbitrary byte sequence |
+//! | 7 | Character String | Text with encoding indicator |
+//! | 8 | Bit String | Bit field with unused bits count |
+//! | 9 | Enumerated | Unsigned integer representing enumeration |
+//! | 10 | Date | Year, month, day, day-of-week |
+//! | 11 | Time | Hour, minute, second, hundredths |
+//! | 12 | Object Identifier | Object type and instance |
+//!
+//! # Examples
+//!
+//! ## Encoding Basic Types
+//!
+//! ```rust
+//! use bacnet_rs::encoding::{encode_application_unsigned, encode_application_real, encode_application_boolean};
+//!
+//! let mut buffer = Vec::new();
+//!
+//! // Encode an unsigned integer
+//! encode_application_unsigned(&mut buffer, 42).unwrap();
+//!
+//! // Encode a real number
+//! encode_application_real(&mut buffer, 23.5).unwrap();
+//!
+//! // Encode a boolean
+//! encode_application_boolean(&mut buffer, true).unwrap();
+//!
+//! println!("Encoded {} bytes", buffer.len());
 //! ```
+//!
+//! ## Decoding Basic Types
+//!
+//! ```rust
+//! use bacnet_rs::encoding::{decode_application_unsigned, decode_application_real, ApplicationTag};
+//!
+//! // Sample encoded data (tag + value)
+//! let data = vec![0x21, 0x2A]; // Unsigned integer 42
+//!
+//! // Decode the value
+//! let (value, consumed) = decode_application_unsigned(&data).unwrap();
+//! assert_eq!(value, 42);
+//! assert_eq!(consumed, 2);
+//! ```
+//!
+//! ## Working with Application Tags
+//!
+//! ```rust
+//! use bacnet_rs::encoding::{ApplicationTag, get_application_tag};
+//!
+//! let data = vec![0x21, 0x2A]; // Unsigned integer
+//! let tag = get_application_tag(&data).unwrap();
+//! assert_eq!(tag, ApplicationTag::UnsignedInteger);
+//! ```
+//!
+//! ## Context-Specific Encoding
+//!
+//! ```rust
+//! use bacnet_rs::encoding::{encode_context_unsigned, decode_context_unsigned};
+//!
+//! let mut buffer = Vec::new();
+//!
+//! // Encode with context tag 3
+//! encode_context_unsigned(&mut buffer, 3, 1000).unwrap();
+//!
+//! // Decode with expected context tag 3
+//! let (value, consumed) = decode_context_unsigned(&buffer, 3).unwrap();
+//! assert_eq!(value, 1000);
+//! ```
+//!
+//! # Error Handling
+//!
+//! Encoding operations can fail for several reasons:
+//!
+//! - **Buffer Overflow**: Output buffer is too small
+//! - **Invalid Data**: Input data is malformed or invalid
+//! - **Type Mismatch**: Data doesn't match expected type
+//! - **Length Error**: Incorrect length fields
+//!
+//! ```rust
+//! use bacnet_rs::encoding::{EncodingError, decode_application_unsigned};
+//!
+//! let invalid_data = vec![0x21]; // Missing value byte
+//! match decode_application_unsigned(&invalid_data) {
+//!     Ok((value, _)) => println!("Value: {}", value),
+//!     Err(EncodingError::InsufficientData) => println!("Not enough data"),
+//!     Err(e) => println!("Other error: {:?}", e),
+//! }
+//! ```
+//!
+//! # Performance Notes
+//!
+//! - Encoding functions write directly to provided buffers for efficiency
+//! - Decoding functions return both the decoded value and bytes consumed
+//! - No dynamic allocation is required for basic encoding/decoding operations
+//! - Context tag validation is performed during decoding for safety
 
 #[cfg(feature = "std")]
 use std::error::Error;

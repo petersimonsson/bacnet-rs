@@ -1,27 +1,201 @@
-//! Utility Functions Module
+//! BACnet Utility Functions and Debugging Tools
 //!
-//! This module provides common utility functions and helpers used throughout the
-//! BACnet stack implementation. These utilities include data conversion, validation,
-//! debugging tools, and other helper functions.
+//! This module provides comprehensive utility functions, debugging tools, and helper utilities
+//! used throughout the BACnet stack implementation. It includes low-level utilities for data
+//! processing, performance monitoring, debugging assistance, and protocol-specific calculations.
 //!
 //! # Overview
 //!
-//! Utilities provided include:
-//! - CRC calculation for MS/TP
-//! - Data conversion helpers
-//! - Time and date utilities
-//! - Debugging and logging helpers
-//! - Buffer management utilities
-//! - BACnet-specific validations
+//! The utility module is organized into several functional areas:
 //!
-//! # Example
+//! ## Core Utilities
+//! - **CRC Calculations**: MS/TP header and data CRC algorithms
+//! - **Object ID Encoding**: Conversion between object type/instance and 32-bit identifiers  
+//! - **Data Conversion**: Byte order handling, bit manipulation, type conversions
+//! - **Validation**: Input validation and range checking functions
 //!
-//! ```no_run
-//! use bacnet_rs::util::*;
+//! ## Performance Monitoring
+//! - **Statistics Collection**: Network and processing performance metrics
+//! - **Timing Measurements**: High-precision timing for profiling
+//! - **Resource Monitoring**: Memory and CPU usage tracking
+//! - **Circular Buffers**: Efficient data structures for logging and history
 //!
-//! // Example of using CRC calculation
+//! ## Debugging and Analysis
+//! - **Protocol Debugging**: Deep packet inspection and analysis tools
+//! - **Hex Dumping**: Formatted binary data display with annotations
+//! - **Property Formatters**: Human-readable display of BACnet values
+//! - **Service Analysis**: Request/response parsing and validation
+//!
+//! ## Retry and Reliability
+//! - **Exponential Backoff**: Adaptive retry algorithms
+//! - **Timeout Management**: Configurable timeout strategies
+//! - **Error Recovery**: Automatic recovery from transient failures
+//!
+//! # Core Functions
+//!
+//! ## CRC Calculations
+//!
+//! BACnet uses different CRC algorithms for different data link types:
+//!
+//! ```rust
+//! use bacnet_rs::util::crc16_mstp;
+//!
+//! // Calculate CRC for MS/TP frame data
 //! let data = b"Hello BACnet";
 //! let crc = crc16_mstp(data);
+//! println!("CRC-16: 0x{:04X}", crc);
+//! ```
+//!
+//! ## Object ID Encoding
+//!
+//! BACnet object identifiers combine object type and instance into a 32-bit value:
+//!
+//! ```rust
+//! use bacnet_rs::util::{encode_object_id, decode_object_id};
+//!
+//! // Encode object type 0 (Analog Input), instance 42
+//! let encoded = encode_object_id(0, 42).unwrap();
+//! println!("Encoded: 0x{:08X}", encoded);
+//!
+//! // Decode back to type and instance
+//! let (obj_type, instance) = decode_object_id(encoded);
+//! assert_eq!(obj_type, 0);
+//! assert_eq!(instance, 42);
+//! ```
+//!
+//! # Performance Monitoring
+//!
+//! The performance monitoring subsystem provides detailed metrics collection:
+//!
+//! ```rust
+//! use bacnet_rs::util::performance::{PerformanceMonitor, ScopedTimer};
+//! use std::time::Duration;
+//!
+//! let mut monitor = PerformanceMonitor::new();
+//!
+//! // Measure operation timing
+//! {
+//!     let _timer = ScopedTimer::new(&mut monitor, "network_operation");
+//!     // Perform network operation
+//!     std::thread::sleep(Duration::from_millis(10));
+//! } // Timer automatically records duration
+//!
+//! // Get statistics
+//! let stats = monitor.get_stats("network_operation");
+//! println!("Average time: {:?}", stats.average_duration());
+//! ```
+//!
+//! # Statistics Collection
+//!
+//! Track communication and processing statistics:
+//!
+//! ```rust
+//! use bacnet_rs::util::statistics::{CommunicationStats, StatsCollector};
+//!
+//! let mut stats = CommunicationStats::new();
+//!
+//! // Record successful operations
+//! stats.record_request_sent();
+//! stats.record_response_received(100); // 100 bytes received
+//!
+//! // Record errors
+//! stats.record_timeout();
+//! stats.record_error();
+//!
+//! // Get metrics
+//! println!("Success rate: {:.2}%", stats.success_rate() * 100.0);
+//! println!("Average response size: {} bytes", stats.average_response_size());
+//! ```
+//!
+//! # Debug Formatting
+//!
+//! Comprehensive debugging tools for protocol analysis:
+//!
+//! ```rust
+//! use bacnet_rs::util::debug::{format_property_value, annotated_hex_dump};
+//!
+//! // Format property values for human reading
+//! let data = vec![0x21, 0x2A]; // Unsigned integer 42
+//! let formatted = format_property_value(&data);
+//! println!("Property value: {}", formatted);
+//!
+//! // Create annotated hex dumps
+//! let frame_data = vec![0x81, 0x0A, 0x00, 0x08, 0x01, 0x00, 0x00, 0x00];
+//! let annotations = vec![
+//!     (0, "BVLC Type".to_string()),
+//!     (1, "BVLC Function".to_string()),
+//!     (2, "BVLC Length".to_string()),
+//! ];
+//! let dump = annotated_hex_dump(&frame_data, &annotations);
+//! println!("{}", dump);
+//! ```
+//!
+//! # Retry Mechanisms
+//!
+//! Configurable retry strategies for reliable communication:
+//!
+//! ```rust
+//! use bacnet_rs::util::{RetryConfig, ExponentialBackoff};
+//! use std::time::Duration;
+//!
+//! let config = RetryConfig {
+//!     max_attempts: 3,
+//!     initial_delay: Duration::from_millis(100),
+//!     max_delay: Duration::from_secs(5),
+//!     backoff_factor: 2.0,
+//! };
+//!
+//! let mut backoff = ExponentialBackoff::new(config);
+//!
+//! // Use in retry loop
+//! for attempt in 0..config.max_attempts {
+//!     match try_operation() {
+//!         Ok(result) => break,
+//!         Err(_) if attempt < config.max_attempts - 1 => {
+//!             let delay = backoff.next_delay();
+//!             std::thread::sleep(delay);
+//!         }
+//!         Err(e) => return Err(e),
+//!     }
+//! }
+//! # fn try_operation() -> Result<(), Box<dyn std::error::Error>> { Ok(()) }
+//! ```
+//!
+//! # Circular Buffers
+//!
+//! Efficient data structures for event logging and history:
+//!
+//! ```rust
+//! use bacnet_rs::util::CircularBuffer;
+//!
+//! let mut buffer = CircularBuffer::new(100); // Capacity of 100 items
+//!
+//! // Add items (oldest are automatically removed when full)
+//! for i in 0..150 {
+//!     buffer.push(format!("Event {}", i));
+//! }
+//!
+//! // Buffer contains the last 100 items
+//! assert_eq!(buffer.len(), 100);
+//! assert_eq!(buffer.get(0).unwrap(), "Event 50"); // Oldest remaining
+//! assert_eq!(buffer.get(99).unwrap(), "Event 149"); // Newest
+//! ```
+//!
+//! # No-std Compatibility
+//!
+//! Most utilities work in `no_std` environments with appropriate feature flags:
+//!
+//! ```rust
+//! #![no_std]
+//! extern crate alloc;
+//! use bacnet_rs::util::{crc16_mstp, encode_object_id};
+//!
+//! // CRC calculation works without std
+//! let data = b"test";
+//! let crc = crc16_mstp(data);
+//!
+//! // Object ID encoding works without std
+//! let encoded = encode_object_id(0, 42).unwrap();
 //! ```
 
 // Debug formatting utilities

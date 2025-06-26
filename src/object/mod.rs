@@ -1,37 +1,116 @@
-//! BACnet Object Types Module
+//! BACnet Object Types and Property Management
 //!
-//! This module defines BACnet object types and their properties according to ASHRAE 135.
-//! Objects are the fundamental modeling concept in BACnet, representing physical inputs,
-//! outputs, control values, and software functions.
+//! This module defines BACnet object types and their properties according to ASHRAE Standard 135.
+//! Objects are the fundamental modeling concept in BACnet, representing physical and logical
+//! entities in building automation systems such as sensors, actuators, controllers, and data points.
 //!
 //! # Overview
 //!
-//! BACnet objects consist of:
-//! - A unique object identifier (type + instance number)
-//! - A collection of properties that describe the object's state and behavior
-//! - Required properties that must be present
-//! - Optional properties that may be present
+//! BACnet objects are the core abstraction for all entities in a BACnet system. Each object consists of:
 //!
-//! # Standard Object Types
+//! - **Object Identifier**: A unique 32-bit identifier combining object type and instance number
+//! - **Properties**: A collection of named values that describe the object's state, configuration, and behavior
+//! - **Required Properties**: Properties that must be present in all instances of an object type
+//! - **Optional Properties**: Properties that may be present depending on the implementation
 //!
-//! Common object types include:
-//! - Analog Input/Output/Value
-//! - Binary Input/Output/Value
-//! - Multi-state Input/Output/Value
-//! - Device
-//! - Schedule
-//! - Calendar
-//! - Trend Log
-//! - And many more...
+//! # Object Hierarchy
 //!
-//! # Example
+//! Objects are organized into categories based on their function:
 //!
-//! ```no_run
-//! use bacnet_rs::object::*;
+//! ## Input Objects
+//! - [`AnalogInput`](ObjectType::AnalogInput): Represents analog sensor readings (temperature, pressure, etc.)
+//! - [`BinaryInput`](ObjectType::BinaryInput): Represents digital sensor states (on/off, open/closed)
+//! - [`MultiStateInput`](ObjectType::MultiStateInput): Represents enumerated sensor states
 //!
-//! // Example of creating an object identifier
-//! let obj_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
+//! ## Output Objects  
+//! - [`AnalogOutput`](ObjectType::AnalogOutput): Controls analog actuators (valve position, damper angle)
+//! - [`BinaryOutput`](ObjectType::BinaryOutput): Controls digital actuators (pumps, fans, lights)
+//! - [`MultiStateOutput`](ObjectType::MultiStateOutput): Controls multi-position actuators
+//!
+//! ## Value Objects
+//! - [`AnalogValue`](ObjectType::AnalogValue): Software variables for calculations and setpoints
+//! - [`BinaryValue`](ObjectType::BinaryValue): Software flags and status indicators
+//! - [`MultiStateValue`](ObjectType::MultiStateValue): Software enumerated values
+//!
+//! ## System Objects
+//! - [`Device`](ObjectType::Device): Represents a BACnet device (required in every device)
+//! - [`Schedule`](ObjectType::Schedule): Time-based control schedules
+//! - [`Calendar`](ObjectType::Calendar): Date-based event definitions
+//! - [`TrendLog`](ObjectType::TrendLog): Historical data logging
+//!
+//! # Property System
+//!
+//! Properties are the attributes that describe an object's state and behavior. Common properties include:
+//!
+//! - **Present Value**: The current value or state of the object
+//! - **Object Name**: A human-readable name for the object
+//! - **Description**: Additional descriptive text
+//! - **Units**: Engineering units for analog values
+//! - **Reliability**: Indicates if the value is reliable
+//!
+//! # Examples
+//!
+//! ## Creating Object Identifiers
+//!
+//! ```rust
+//! use bacnet_rs::object::{ObjectIdentifier, ObjectType};
+//!
+//! // Create an object identifier for analog input #1
+//! let temp_sensor = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
+//! assert_eq!(temp_sensor.object_type, ObjectType::AnalogInput);
+//! assert_eq!(temp_sensor.instance, 1);
+//!
+//! // Create device object (instance 123456)
+//! let device = ObjectIdentifier::new(ObjectType::Device, 123456);
+//! assert!(device.is_valid());
 //! ```
+//!
+//! ## Working with Properties
+//!
+//! ```rust
+//! use bacnet_rs::object::{PropertyIdentifier, PropertyValue};
+//!
+//! // Property identifiers for common properties
+//! let present_value = PropertyIdentifier::PresentValue;
+//! let object_name = PropertyIdentifier::ObjectName;
+//! let units = PropertyIdentifier::Units;
+//!
+//! // Property values can represent different data types
+//! let temperature = PropertyValue::Real(23.5);
+//! let name = PropertyValue::CharacterString("Temperature Sensor".to_string());
+//! let unit_enum = PropertyValue::Enumerated(64); // Degrees Celsius
+//! ```
+//!
+//! ## Object Database Usage
+//!
+//! ```rust,no_run
+//! use bacnet_rs::object::{database::ObjectDatabase, ObjectIdentifier, ObjectType, PropertyIdentifier, PropertyValue};
+//!
+//! // Create an object database
+//! let mut db = ObjectDatabase::new();
+//!
+//! // Add an object
+//! let obj_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
+//! db.add_object(obj_id).expect("Failed to add object");
+//!
+//! // Set properties
+//! db.set_property(obj_id, PropertyIdentifier::ObjectName, 
+//!     PropertyValue::CharacterString("Room Temperature".to_string()))
+//!     .expect("Failed to set property");
+//!
+//! // Read properties
+//! let name = db.get_property(obj_id, PropertyIdentifier::ObjectName)
+//!     .expect("Property not found");
+//! ```
+//!
+//! # Standards Compliance
+//!
+//! This implementation follows ASHRAE Standard 135-2020 and includes:
+//!
+//! - All standard object types defined in the specification
+//! - Complete property identifier enumeration
+//! - Proper object identifier encoding/decoding
+//! - Thread-safe object database implementation
 
 
 #[cfg(feature = "std")]

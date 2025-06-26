@@ -1,24 +1,137 @@
+//! # BACnet-RS: A Complete BACnet Protocol Stack Implementation in Rust
+//!
+//! BACnet-RS is a comprehensive implementation of the BACnet (Building Automation and Control Networks) 
+//! protocol stack written in Rust. It provides a complete, standards-compliant BACnet implementation 
+//! suitable for both embedded systems and full-featured applications.
+//!
+//! ## Features
+//!
+//! - **Complete Protocol Stack**: Full implementation of BACnet layers (Application, Network, Data Link)
+//! - **Multiple Data Link Support**: BACnet/IP, Ethernet, MS/TP, and more
+//! - **Standards Compliant**: Implements ASHRAE Standard 135-2020
+//! - **No-std Compatible**: Works in embedded environments without heap allocation
+//! - **Async Support**: Optional async/await support with Tokio integration
+//! - **Comprehensive Services**: Read/Write properties, Who-Is/I-Am, object discovery, and more
+//! - **Debugging Tools**: Built-in protocol analyzers and debug formatters
+//! - **Performance Monitoring**: Statistics collection and performance metrics
+//!
+//! ## Quick Start
+//!
+//! ```rust,no_run
+//! use bacnet_rs::{client::BacnetClient, object::ObjectIdentifier, ObjectType};
+//! 
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! // Create a BACnet client
+//! let mut client = BacnetClient::new("0.0.0.0:47808").await?;
+//! 
+//! // Discover devices on the network
+//! let devices = client.who_is_scan(std::time::Duration::from_secs(5)).await?;
+//! println!("Found {} devices", devices.len());
+//! 
+//! // Read a property from a device
+//! if let Some(device) = devices.first() {
+//!     let object_id = ObjectIdentifier::new(ObjectType::Device, device.instance);
+//!     let name = client.read_property_string(
+//!         device.address.clone(),
+//!         object_id,
+//!         bacnet_rs::object::PropertyIdentifier::ObjectName
+//!     ).await?;
+//!     println!("Device name: {}", name);
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Architecture
+//!
+//! The library is organized into several key modules:
+//!
+//! - [`datalink`]: Data link layer implementations (BACnet/IP, Ethernet, MS/TP)
+//! - [`network`]: Network layer for routing and addressing
+//! - [`transport`]: Transport layer with reliability and flow control
+//! - [`service`]: BACnet services (confirmed and unconfirmed)
+//! - [`object`]: BACnet object types and property handling
+//! - [`client`]: High-level client API for applications
+//! - [`util`]: Utilities for CRC, encoding, and debugging
+//!
+//! ## Data Link Types
+//!
+//! BACnet-RS supports multiple data link layer protocols:
+//!
+//! - **BACnet/IP**: UDP-based communication over IP networks (most common)
+//! - **BACnet/Ethernet**: Direct Ethernet frame communication
+//! - **MS/TP**: Master-Slave Token Passing over RS-485 serial networks
+//! - **Point-to-Point**: Direct serial communication
+//!
+//! ## Examples
+//!
+//! The crate includes comprehensive examples in the `examples/` directory:
+//!
+//! - **Basic Examples**: Simple device creation and communication
+//! - **Networking Examples**: Who-Is scans, transport demonstrations
+//! - **Object Examples**: Device and object discovery, property reading
+//! - **Debugging Examples**: Protocol analysis and debug formatting
+//!
+//! Run examples with:
+//! ```bash
+//! cargo run --example whois_scan
+//! cargo run --example device_objects
+//! ```
+//!
+//! ## Features
+//!
+//! - `std` (default): Enable standard library support
+//! - `async` (default): Enable async/await support with Tokio
+//! - `serde` (default): Enable serialization support
+//! - `no-std`: Disable standard library for embedded use
+//!
+//! ## License
+//!
+//! Licensed under either of
+//! - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+//! - MIT License ([LICENSE-MIT](LICENSE-MIT))
+//!
+//! at your option.
+
 #![doc = include_str!("../README.md")]
 #![cfg_attr(not(feature = "std"), no_std)]
+#![warn(missing_docs)]
 
+/// Application layer protocol services and message handling
 pub mod app;
+
+/// Data link layer implementations for various BACnet physical networks
 pub mod datalink;
+
+/// BACnet encoding and decoding utilities for application tags and values
 pub mod encoding;
+
+/// Network layer for BACnet routing, addressing, and message forwarding
 pub mod network;
+
+/// BACnet object definitions, properties, and type system
 pub mod object;
+
+/// BACnet service definitions for confirmed and unconfirmed operations
 pub mod service;
+
+/// Transport layer providing reliability, segmentation, and flow control
 pub mod transport;
+
+/// Utility functions for CRC calculations, debugging, and performance monitoring
 pub mod util;
+
+/// BACnet vendor identification and device information
 pub mod vendor;
 
-// High-level client utilities
+/// High-level client API for BACnet communication (requires std feature)
 #[cfg(feature = "std")]
 pub mod client;
 
-// Property value decoders
+/// Property value decoders for various BACnet data types
 pub mod property;
 
-// Re-export main types without glob imports to avoid conflicts
+// Re-export main types for convenient access
 pub use datalink::{DataLink, DataLinkAddress, DataLinkType};
 pub use encoding::{ApplicationTag, EncodingError};
 pub use object::{BacnetObject, ObjectType, PropertyIdentifier};
@@ -31,8 +144,15 @@ extern crate std;
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
+/// BACnet protocol version as defined in ASHRAE 135
 pub const BACNET_PROTOCOL_VERSION: u8 = 1;
+
+/// Maximum Application Protocol Data Unit size in bytes
+/// This is the largest APDU that can be transmitted in a single BACnet message
 pub const BACNET_MAX_APDU: usize = 1476;
+
+/// Maximum Message Protocol Data Unit size in bytes  
+/// This includes the NPDU header and APDU payload
 pub const BACNET_MAX_MPDU: usize = 1497;
 
 #[cfg(test)]

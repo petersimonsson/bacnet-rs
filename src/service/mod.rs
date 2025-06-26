@@ -1,35 +1,177 @@
-//! BACnet Services Module
+//! BACnet Application Layer Services
 //!
-//! This module implements BACnet application layer services as defined in ASHRAE 135.
-//! Services are the core communication primitives used for device interaction in BACnet.
+//! This module implements BACnet application layer services as defined in ASHRAE Standard 135.
+//! Services are the fundamental communication primitives that enable devices to interact in a
+//! BACnet network, providing standardized operations for reading data, writing values, receiving
+//! notifications, and managing devices.
 //!
 //! # Overview
 //!
-//! BACnet services are categorized into several groups:
-//! - Alarm and Event Services
-//! - File Access Services
-//! - Object Access Services
-//! - Remote Device Management Services
-//! - Virtual Terminal Services
+//! BACnet services define the application-level protocols for device communication. They abstract
+//! the underlying network complexity and provide a consistent interface for building automation
+//! operations. Each service defines:
+//!
+//! - **Request Structure**: Parameters needed to invoke the service
+//! - **Response Structure**: Data returned by the service
+//! - **Error Handling**: Standardized error codes and descriptions
+//! - **Encoding Rules**: How requests and responses are serialized
+//!
+//! # Service Categories
+//!
+//! BACnet services are organized into functional groups:
+//!
+//! ## Alarm and Event Services
+//! Handle alarm conditions and event notifications:
+//! - **AcknowledgeAlarm**: Acknowledge alarm conditions
+//! - **ConfirmedEventNotification**: Reliable event notifications
+//! - **UnconfirmedEventNotification**: Best-effort event notifications
+//! - **GetAlarmSummary**: Retrieve active alarms
+//! - **GetEventInformation**: Get detailed event information
+//!
+//! ## File Access Services
+//! Provide file system operations for devices that support file access:
+//! - **AtomicReadFile**: Read file contents atomically
+//! - **AtomicWriteFile**: Write file contents atomically
+//! - **CreateObject**: Create new objects (including file objects)
+//! - **DeleteObject**: Remove objects from the device
+//!
+//! ## Object Access Services
+//! Core services for reading and writing object properties:
+//! - **ReadProperty**: Read a single property value
+//! - **ReadPropertyMultiple**: Read multiple properties efficiently
+//! - **WriteProperty**: Write a single property value
+//! - **WritePropertyMultiple**: Write multiple properties efficiently
+//!
+//! ## Remote Device Management Services
+//! Enable device configuration and management:
+//! - **DeviceCommunicationControl**: Enable/disable device communication
+//! - **ConfirmedPrivateTransfer**: Vendor-specific communications
+//! - **UnconfirmedPrivateTransfer**: Vendor-specific notifications
+//! - **ReinitializeDevice**: Restart or reconfigure devices
+//!
+//! ## Virtual Terminal Services
+//! Support text-based terminal access:
+//! - **VTOpen**: Open virtual terminal session
+//! - **VTClose**: Close virtual terminal session
+//! - **VTData**: Exchange terminal data
+//!
+//! ## Remote Device Discovery
+//! Services for network discovery and device identification:
+//! - **WhoIs**: Discover devices on the network
+//! - **IHave**: Announce object availability
+//! - **WhoHas**: Search for specific objects
+//! - **IAm**: Device identification response
 //!
 //! # Service Types
 //!
-//! Services can be:
-//! - Confirmed: Require acknowledgment from the recipient
-//! - Unconfirmed: Fire-and-forget, no acknowledgment required
+//! BACnet services are classified by their reliability requirements:
 //!
-//! # Example
+//! ## Confirmed Services
+//! These services require acknowledgment from the recipient and provide reliable delivery:
+//! - Use sequence numbers for duplicate detection
+//! - Support segmentation for large messages
+//! - Provide error responses for failed operations
+//! - Include timeout and retry mechanisms
 //!
-//! ```no_run
-//! use bacnet_rs::service::*;
+//! ## Unconfirmed Services  
+//! These services are "fire-and-forget" with no acknowledgment:
+//! - Lower overhead and faster transmission
+//! - No delivery guarantee
+//! - Suitable for periodic updates and notifications
+//! - No error reporting mechanism
 //!
-//! // Example of using a service
-//! // let request = ReadPropertyRequest {
-//! //     object_identifier: ObjectIdentifier::new(ObjectType::AnalogInput, 1),
-//! //     property_identifier: PropertyIdentifier::PresentValue,
-//! //     property_array_index: None,
-//! // };
+//! # Examples
+//!
+//! ## Reading a Property
+//!
+//! ```rust
+//! use bacnet_rs::service::{ConfirmedServiceChoice, ReadPropertyService};
+//! use bacnet_rs::object::{ObjectIdentifier, ObjectType, PropertyIdentifier};
+//!
+//! // Create a read property request
+//! let object_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
+//! let request = ReadPropertyService {
+//!     object_identifier: object_id,
+//!     property_identifier: PropertyIdentifier::PresentValue,
+//!     property_array_index: None,
+//! };
+//!
+//! // This would be sent as a confirmed service
+//! let service = ConfirmedServiceChoice::ReadProperty(request);
 //! ```
+//!
+//! ## Device Discovery
+//!
+//! ```rust
+//! use bacnet_rs::service::{UnconfirmedServiceChoice, WhoIsService};
+//!
+//! // Create a Who-Is request to discover all devices
+//! let who_is = WhoIsService {
+//!     device_instance_range_low_limit: None,
+//!     device_instance_range_high_limit: None,
+//! };
+//!
+//! // This would be sent as an unconfirmed service
+//! let service = UnconfirmedServiceChoice::WhoIs(who_is);
+//! ```
+//!
+//! ## Reading Multiple Properties
+//!
+//! ```rust
+//! use bacnet_rs::service::{ConfirmedServiceChoice, ReadPropertyMultipleService, ReadAccessSpecification};
+//! use bacnet_rs::object::{ObjectIdentifier, ObjectType, PropertyIdentifier};
+//!
+//! // Create a read property multiple request
+//! let object_id = ObjectIdentifier::new(ObjectType::Device, 12345);
+//! let spec = ReadAccessSpecification {
+//!     object_identifier: object_id,
+//!     list_of_property_references: vec![
+//!         PropertyIdentifier::ObjectName,
+//!         PropertyIdentifier::ModelName,
+//!         PropertyIdentifier::VendorName,
+//!     ],
+//! };
+//!
+//! let request = ReadPropertyMultipleService {
+//!     list_of_read_access_specs: vec![spec],
+//! };
+//!
+//! let service = ConfirmedServiceChoice::ReadPropertyMultiple(request);
+//! ```
+//!
+//! # Error Handling
+//!
+//! Services can fail for various reasons, and BACnet defines standardized error responses:
+//!
+//! ```rust
+//! use bacnet_rs::service::{ServiceError, ErrorClass, ErrorCode};
+//!
+//! // Example error handling
+//! let error = ServiceError {
+//!     error_class: ErrorClass::Object,
+//!     error_code: ErrorCode::UnknownObject,
+//! };
+//!
+//! match error.error_class {
+//!     ErrorClass::Object => println!("Object-related error: {:?}", error.error_code),
+//!     ErrorClass::Property => println!("Property-related error: {:?}", error.error_code),
+//!     ErrorClass::Device => println!("Device-related error: {:?}", error.error_code),
+//!     _ => println!("Other error: {:?}", error),
+//! }
+//! ```
+//!
+//! # Protocol Integration
+//!
+//! Services integrate with the lower protocol layers:
+//!
+//! 1. **Application Layer**: Services define the high-level operations
+//! 2. **Transport Layer**: Handles reliability, segmentation, and flow control
+//! 3. **Network Layer**: Provides routing and addressing
+//! 4. **Data Link Layer**: Manages frame transmission and media access
+//!
+//! This layered approach allows services to work across different network types
+//! and provides a consistent programming interface regardless of the underlying
+//! communication technology.
 
 #[cfg(feature = "std")]
 use std::error::Error;
