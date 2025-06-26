@@ -673,6 +673,199 @@ pub fn decode_double(data: &[u8]) -> Result<(f64, usize)> {
     Ok((value, consumed))
 }
 
+/// Encode a context-specific tag
+pub fn encode_context_tag(buffer: &mut Vec<u8>, tag_number: u8, length: usize) -> Result<()> {
+    if tag_number > 14 {
+        return Err(EncodingError::ValueOutOfRange);
+    }
+    
+    let tag_byte = if length < 5 {
+        0x08 | (tag_number << 4) | (length as u8)
+    } else {
+        0x08 | (tag_number << 4) | 5
+    };
+    
+    buffer.push(tag_byte);
+    
+    if length >= 5 {
+        if length < 254 {
+            buffer.push(length as u8);
+        } else if length < 65536 {
+            buffer.push(254);
+            buffer.extend_from_slice(&(length as u16).to_be_bytes());
+        } else {
+            buffer.push(255);
+            buffer.extend_from_slice(&(length as u32).to_be_bytes());
+        }
+    }
+    
+    Ok(())
+}
+
+/// Encode a context-specific unsigned integer
+pub fn encode_context_unsigned(value: u32, tag_number: u8) -> Result<Vec<u8>> {
+    let mut buffer = Vec::new();
+    
+    // Determine the number of bytes needed for the unsigned value
+    let bytes = if value == 0 {
+        vec![0]
+    } else if value <= 0xFF {
+        vec![value as u8]
+    } else if value <= 0xFFFF {
+        (value as u16).to_be_bytes().to_vec()
+    } else if value <= 0xFFFFFF {
+        let bytes = (value as u32).to_be_bytes();
+        bytes[1..].to_vec()
+    } else {
+        (value as u32).to_be_bytes().to_vec()
+    };
+    
+    // Encode the context tag
+    encode_context_tag(&mut buffer, tag_number, bytes.len())?;
+    
+    // Add the value bytes
+    buffer.extend_from_slice(&bytes);
+    
+    Ok(buffer)
+}
+
+/// Decode a context-specific tag
+pub fn decode_context_tag(data: &[u8]) -> Result<(u8, usize, usize)> {
+    if data.is_empty() {
+        return Err(EncodingError::InvalidTag);
+    }
+    
+    let tag_byte = data[0];
+    if (tag_byte & 0x08) == 0 {
+        return Err(EncodingError::InvalidTag);
+    }
+    
+    let tag_number = (tag_byte >> 4) & 0x0F;
+    let mut length = (tag_byte & 0x07) as usize;
+    let mut consumed = 1;
+    
+    if length == 5 {
+        if data.len() < 2 {
+            return Err(EncodingError::BufferUnderflow);
+        }
+        
+        let len_byte = data[1];
+        consumed += 1;
+        
+        if len_byte < 254 {
+            length = len_byte as usize;
+        } else if len_byte == 254 {
+            if data.len() < 4 {
+                return Err(EncodingError::BufferUnderflow);
+            }
+            length = u16::from_be_bytes([data[2], data[3]]) as usize;
+            consumed += 2;
+        } else {
+            if data.len() < 6 {
+                return Err(EncodingError::BufferUnderflow);
+            }
+            length = u32::from_be_bytes([data[2], data[3], data[4], data[5]]) as usize;
+            consumed += 4;
+        }
+    }
+    
+    Ok((tag_number, length, consumed))
+}
+
+/// Decode a context-specific unsigned integer
+pub fn decode_context_unsigned(data: &[u8], expected_tag: u8) -> Result<(u32, usize)> {
+    let (tag_number, length, tag_consumed) = decode_context_tag(data)?;
+    
+    if tag_number != expected_tag {
+        return Err(EncodingError::InvalidTag);
+    }
+    
+    if data.len() < tag_consumed + length {
+        return Err(EncodingError::BufferUnderflow);
+    }
+    
+    let value = match length {
+        0 => 0,
+        1 => data[tag_consumed] as u32,
+        2 => u16::from_be_bytes([data[tag_consumed], data[tag_consumed + 1]]) as u32,
+        3 => {
+            let bytes = [0, data[tag_consumed], data[tag_consumed + 1], data[tag_consumed + 2]];
+            u32::from_be_bytes(bytes)
+        },
+        4 => u32::from_be_bytes([
+            data[tag_consumed],
+            data[tag_consumed + 1],
+            data[tag_consumed + 2],
+            data[tag_consumed + 3],
+        ]),
+        _ => return Err(EncodingError::InvalidLength),
+    };
+    
+    Ok((value, tag_consumed + length))
+}
+
+/// Encode a context-specific enumerated value
+pub fn encode_context_enumerated(value: u32, tag_number: u8) -> Result<Vec<u8>> {
+    // Enumerated values use the same encoding as unsigned integers
+    encode_context_unsigned(value, tag_number)
+}
+
+/// Decode a context-specific enumerated value
+pub fn decode_context_enumerated(data: &[u8], expected_tag: u8) -> Result<(u32, usize)> {
+    // Enumerated values use the same decoding as unsigned integers
+    decode_context_unsigned(data, expected_tag)
+}
+
+/// Encode a context-specific object identifier
+pub fn encode_context_object_id(object_type: u16, instance: u32, tag_number: u8) -> Result<Vec<u8>> {
+    let mut buffer = Vec::new();
+    
+    // Validate inputs
+    if object_type > 0x3FF || instance > 0x3FFFFF {
+        return Err(EncodingError::ValueOutOfRange);
+    }
+    
+    // Combine object type and instance into 4-byte object identifier
+    let object_id = ((object_type as u32) << 22) | instance;
+    
+    // Encode context tag with length 4
+    encode_context_tag(&mut buffer, tag_number, 4)?;
+    
+    // Add the object identifier bytes
+    buffer.extend_from_slice(&object_id.to_be_bytes());
+    
+    Ok(buffer)
+}
+
+/// Decode a context-specific object identifier
+pub fn decode_context_object_id(data: &[u8], expected_tag: u8) -> Result<((u16, u32), usize)> {
+    let (tag_number, length, tag_consumed) = decode_context_tag(data)?;
+    
+    if tag_number != expected_tag {
+        return Err(EncodingError::InvalidTag);
+    }
+    
+    if length != 4 {
+        return Err(EncodingError::InvalidLength);
+    }
+    
+    if data.len() < tag_consumed + 4 {
+        return Err(EncodingError::BufferUnderflow);
+    }
+    
+    let object_id = u32::from_be_bytes([
+        data[tag_consumed],
+        data[tag_consumed + 1],
+        data[tag_consumed + 2],
+        data[tag_consumed + 3],
+    ]);
+    
+    let object_type = (object_id >> 22) as u16;
+    let instance = object_id & 0x3FFFFF;
+    
+    Ok(((object_type, instance), tag_consumed + 4))
+}
+
 impl TryFrom<u8> for ApplicationTag {
     type Error = EncodingError;
     

@@ -209,6 +209,26 @@ impl Npdu {
             hop_count: None,
         }
     }
+    
+    /// Create NPDU for global broadcast (matching YABE/bacnet-stack)
+    pub fn global_broadcast() -> Self {
+        Self {
+            version: 1,
+            control: NpduControl {
+                network_message: false,
+                destination_present: true,
+                source_present: false,
+                expecting_reply: false,  // YABE uses 0x20 (no expecting_reply bit)
+                priority: 0,
+            },
+            destination: Some(NetworkAddress {
+                network: 0xFFFF,
+                address: vec![],
+            }),
+            source: None,
+            hop_count: Some(255),
+        }
+    }
 
     /// Check if this is a network layer message
     pub fn is_network_message(&self) -> bool {

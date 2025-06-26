@@ -305,8 +305,16 @@ pub enum AbortReason {
     SegmentationNotSupported = 4,
 }
 
-use crate::encoding::{encode_unsigned, decode_unsigned, Result as EncodingResult};
+use crate::encoding::{
+    encode_unsigned, decode_unsigned, encode_context_unsigned, decode_context_unsigned,
+    encode_context_enumerated, decode_context_enumerated, encode_context_object_id, decode_context_object_id,
+    encode_object_identifier, decode_object_identifier, encode_enumerated, decode_enumerated,
+    Result as EncodingResult
+};
 use crate::object::{ObjectIdentifier, PropertyValue};
+
+/// Special array index value indicating all elements
+pub const BACNET_ARRAY_ALL: u32 = 0xFFFFFFFF;
 
 /// Who-Is request (unconfirmed service)
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -344,17 +352,18 @@ impl WhoIsRequest {
 
     /// Encode the Who-Is request
     pub fn encode(&self, buffer: &mut Vec<u8>) -> EncodingResult<()> {
-        if let Some(low) = self.device_instance_range_low_limit {
+        // Both low and high limits must be present together, or both absent
+        // This matches bacnet-stack behavior
+        if let (Some(low), Some(high)) = (self.device_instance_range_low_limit, self.device_instance_range_high_limit) {
             // Context tag 0 - low limit
-            buffer.push(0x08); // Context tag 0, length 1-4 bytes
-            encode_unsigned(buffer, low)?;
-        }
-        
-        if let Some(high) = self.device_instance_range_high_limit {
+            let low_bytes = encode_context_unsigned(low, 0)?;
+            buffer.extend_from_slice(&low_bytes);
+            
             // Context tag 1 - high limit
-            buffer.push(0x18); // Context tag 1, length 1-4 bytes
-            encode_unsigned(buffer, high)?;
+            let high_bytes = encode_context_unsigned(high, 1)?;
+            buffer.extend_from_slice(&high_bytes);
         }
+        // If only one limit is present, encode nothing (broadcast to all)
         
         Ok(())
     }
@@ -364,27 +373,30 @@ impl WhoIsRequest {
         let mut request = WhoIsRequest::new();
         let mut pos = 0;
 
-        while pos < data.len() {
-            let tag = data[pos];
-            pos += 1;
-
-            match tag & 0xF0 {
-                0x00 => {
-                    // Context tag 0 - low limit
-                    let (low, consumed) = decode_unsigned(&data[pos..])?;
+        // Try to decode context tag 0 (low limit)
+        if pos < data.len() {
+            match decode_context_unsigned(&data[pos..], 0) {
+                Ok((low, consumed)) => {
                     request.device_instance_range_low_limit = Some(low);
                     pos += consumed;
+                    
+                    // If we have low limit, we must have high limit
+                    if pos < data.len() {
+                        match decode_context_unsigned(&data[pos..], 1) {
+                            Ok((high, _consumed)) => {
+                                request.device_instance_range_high_limit = Some(high);
+                            }
+                            Err(_) => {
+                                // Invalid format - low without high
+                                return Err(crate::encoding::EncodingError::InvalidFormat(
+                                    "Who-Is request has low limit without high limit".to_string()
+                                ));
+                            }
+                        }
+                    }
                 }
-                0x10 => {
-                    // Context tag 1 - high limit
-                    let (high, consumed) = decode_unsigned(&data[pos..])?;
-                    request.device_instance_range_high_limit = Some(high);
-                    pos += consumed;
-                }
-                _ => {
-                    // Skip unknown tags
-                    let length = (tag & 0x0F) as usize;
-                    pos += length;
+                Err(_) => {
+                    // No device range specified - broadcast to all
                 }
             }
         }
@@ -440,22 +452,20 @@ impl IAmRequest {
 
     /// Encode the I-Am request
     pub fn encode(&self, buffer: &mut Vec<u8>) -> EncodingResult<()> {
-        // Device identifier (object identifier)
-        let device_id = crate::util::encode_object_id(
+        // Device identifier (object identifier) - application tag
+        encode_object_identifier(
+            buffer,
             self.device_identifier.object_type as u16,
-            self.device_identifier.instance,
-        ).ok_or(crate::encoding::EncodingError::InvalidFormat("Invalid object identifier".to_string()))?;
-        buffer.push(0xC4); // Application tag 12 (ObjectIdentifier), length 4
-        buffer.extend_from_slice(&device_id.to_be_bytes());
+            self.device_identifier.instance
+        )?;
 
-        // Maximum APDU length accepted
+        // Maximum APDU length accepted - application tag
         encode_unsigned(buffer, self.max_apdu_length_accepted)?;
 
-        // Segmentation supported
-        buffer.push(0x91); // Application tag 9 (Enumerated), length 1
-        buffer.push(self.segmentation_supported as u8);
+        // Segmentation supported - application tag (enumerated)
+        encode_enumerated(buffer, self.segmentation_supported)?;
 
-        // Vendor identifier
+        // Vendor identifier - application tag
         encode_unsigned(buffer, self.vendor_identifier)?;
 
         Ok(())
@@ -465,34 +475,23 @@ impl IAmRequest {
     pub fn decode(data: &[u8]) -> EncodingResult<Self> {
         let mut pos = 0;
 
-        // Decode device identifier
-        if pos + 5 > data.len() || data[pos] != 0xC4 {
-            return Err(crate::encoding::EncodingError::InvalidTag);
-        }
-        pos += 1;
-
-        let device_id_bytes = [data[pos], data[pos + 1], data[pos + 2], data[pos + 3]];
-        let device_id = u32::from_be_bytes(device_id_bytes);
-        let (object_type, instance) = crate::util::decode_object_id(device_id);
+        // Decode device identifier - application tag
+        let ((object_type, instance), consumed) = decode_object_identifier(&data[pos..])?;
         let device_identifier = ObjectIdentifier {
             object_type: crate::object::ObjectType::try_from(object_type).unwrap_or(crate::object::ObjectType::Device),
             instance,
         };
-        pos += 4;
+        pos += consumed;
 
-        // Decode max APDU length accepted
+        // Decode max APDU length accepted - application tag
         let (max_apdu_length_accepted, consumed) = decode_unsigned(&data[pos..])?;
         pos += consumed;
 
-        // Decode segmentation supported
-        if pos + 2 > data.len() || data[pos] != 0x91 {
-            return Err(crate::encoding::EncodingError::InvalidTag);
-        }
-        pos += 1;
-        let segmentation_supported = data[pos] as u32;
-        pos += 1;
+        // Decode segmentation supported - application tag (enumerated)
+        let (segmentation_supported, consumed) = decode_enumerated(&data[pos..])?;
+        pos += consumed;
 
-        // Decode vendor identifier
+        // Decode vendor identifier - application tag
         let (vendor_identifier, _consumed) = decode_unsigned(&data[pos..])?;
 
         Ok(IAmRequest::new(
@@ -541,21 +540,21 @@ impl ReadPropertyRequest {
     /// Encode the Read Property request
     pub fn encode(&self, buffer: &mut Vec<u8>) -> EncodingResult<()> {
         // Object identifier - context tag 0
-        let device_id = crate::util::encode_object_id(
+        let obj_id_bytes = encode_context_object_id(
             self.object_identifier.object_type as u16,
             self.object_identifier.instance,
-        ).ok_or(crate::encoding::EncodingError::InvalidFormat("Invalid object identifier".to_string()))?;
-        buffer.push(0x0C); // Context tag 0, length 4
-        buffer.extend_from_slice(&device_id.to_be_bytes());
+            0
+        )?;
+        buffer.extend_from_slice(&obj_id_bytes);
 
-        // Property identifier - context tag 1
-        buffer.push(0x19); // Context tag 1, length 1
-        buffer.push(self.property_identifier as u8);
+        // Property identifier - context tag 1 (as enumerated)
+        let prop_id_bytes = encode_context_enumerated(self.property_identifier, 1)?;
+        buffer.extend_from_slice(&prop_id_bytes);
 
         // Property array index - context tag 2 (optional)
         if let Some(array_index) = self.property_array_index {
-            buffer.push(0x29); // Context tag 2, length 1
-            buffer.push(array_index as u8);
+            let array_bytes = encode_context_unsigned(array_index, 2)?;
+            buffer.extend_from_slice(&array_bytes);
         }
 
         Ok(())
@@ -595,39 +594,31 @@ impl ReadPropertyResponse {
         let mut pos = 0;
 
         // Decode object identifier - context tag 0
-        if pos + 5 > data.len() || data[pos] != 0x0C {
-            return Err(crate::encoding::EncodingError::InvalidTag);
-        }
-        pos += 1;
-
-        let object_id_bytes = [data[pos], data[pos + 1], data[pos + 2], data[pos + 3]];
-        let object_id = u32::from_be_bytes(object_id_bytes);
-        let (object_type, instance) = crate::util::decode_object_id(object_id);
+        let ((object_type, instance), consumed) = decode_context_object_id(&data[pos..], 0)?;
         let object_identifier = ObjectIdentifier {
             object_type: crate::object::ObjectType::try_from(object_type).unwrap_or(crate::object::ObjectType::Device),
             instance,
         };
-        pos += 4;
+        pos += consumed;
 
         // Decode property identifier - context tag 1
-        if pos + 2 > data.len() || data[pos] != 0x19 {
-            return Err(crate::encoding::EncodingError::InvalidTag);
-        }
-        pos += 1;
-        let property_identifier = data[pos] as u32;
-        pos += 1;
+        let (property_identifier, consumed) = decode_context_enumerated(&data[pos..], 1)?;
+        pos += consumed;
 
         // Property array index - context tag 2 (optional)
-        let property_array_index = if pos < data.len() && data[pos] == 0x29 {
-            pos += 1;
-            let array_index = data[pos] as u32;
-            pos += 1;
-            Some(array_index)
-        } else {
-            None
+        let property_array_index = match decode_context_unsigned(&data[pos..], 2) {
+            Ok((array_index, consumed)) => {
+                pos += consumed;
+                if array_index == BACNET_ARRAY_ALL {
+                    None
+                } else {
+                    Some(array_index)
+                }
+            }
+            Err(_) => None,
         };
 
-        // Property value - context tag 3
+        // Property value - context tag 3 (opening tag)
         if pos >= data.len() || data[pos] != 0x3E {
             return Err(crate::encoding::EncodingError::InvalidTag);
         }
