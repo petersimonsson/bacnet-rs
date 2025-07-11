@@ -30,9 +30,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("BACnet Who-Is Scan Example");
     println!("========================\n");
 
-    // Create BACnet/IP data link
+    // Create BACnet/IP data link (use 0 to let system choose port)
     println!("Creating BACnet/IP data link...");
-    let mut datalink = BacnetIpDataLink::new("0.0.0.0:47808")?;
+    let mut datalink = BacnetIpDataLink::new("0.0.0.0:0")?;
     
     println!("Data link created successfully");
     println!("Starting Who-Is scan...\n");

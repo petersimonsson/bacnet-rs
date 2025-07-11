@@ -1,6 +1,6 @@
 [package]
 name = "bacnet-rs"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 authors = ["Tom van Hest <tomvanhest@pm.me>"]
 description = "A complete BACnet protocol stack implementation in Rust"
@@ -69,6 +69,16 @@ required-features = ["std"]
 [[example]]
 name = "whois_scan"
 path = "examples/networking/whois_scan.rs"
+required-features = ["std"]
+
+[[example]]
+name = "routed_device_discovery"
+path = "examples/networking/routed_device_discovery.rs"
+required-features = ["std"]
+
+[[example]]
+name = "comprehensive_whois_scan"
+path = "examples/networking/comprehensive_whois_scan.rs"
 required-features = ["std"]
 
 [[example]]

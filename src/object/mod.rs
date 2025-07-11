@@ -380,8 +380,6 @@ pub struct Time {
     pub hundredths: u8, // 0-99, 255 = unspecified
 }
 
-// use crate::util::{encode_object_id, decode_object_id}; // TODO: Will be needed for object encoding
-
 /// Device object implementation
 #[derive(Debug, Clone)]
 pub struct Device {
@@ -430,10 +428,10 @@ impl Device {
             object_type: ObjectType::Device,
             system_status: DeviceStatus::Operational,
             vendor_name: String::from("BACnet-RS"),
-            vendor_identifier: 999, // TODO: Get official vendor ID?
+            vendor_identifier: 999, // Reserved for ASHRAE - appropriate for open-source implementations
             model_name: String::from("Rust BACnet Device"),
             firmware_revision: String::from("1.0.0"),
-            application_software_version: String::from("0.1.0"),
+            application_software_version: String::from("0.2.1"),
             protocol_version: 1,
             protocol_revision: 22, // Current BACnet protocol revision
             protocol_services_supported: ProtocolServicesSupported::default(),
