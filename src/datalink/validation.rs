@@ -642,11 +642,12 @@ mod tests {
             0x02, // Destination
             0x01, // Source
             0x00, 0x00, // Data length = 0
-            0xDB, // Header CRC (calculated for this header)
+            0xFC, // Header CRC (correct value for this header)
         ];
         
         let result = validate_mstp_frame(&frame);
-        assert!(result.errors.is_empty() || !result.errors.iter().any(|e| matches!(e, ValidationError::CrcMismatch { .. })));
+        assert!(result.is_valid);
+        assert!(result.errors.is_empty());
 
         // Invalid preamble
         let mut invalid_frame = frame.clone();

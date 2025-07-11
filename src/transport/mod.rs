@@ -241,7 +241,7 @@ pub struct BacnetIpConfig {
 impl Default for BacnetIpConfig {
     fn default() -> Self {
         Self {
-            bind_address: "0.0.0.0:47808".parse().unwrap(),
+            bind_address: "0.0.0.0:47808".parse().expect("hardcoded address should be valid"),
             broadcast_enabled: true,
             foreign_device: None,
             bdt: Vec::new(),
@@ -916,21 +916,24 @@ pub mod timeout_utils {
     {
         let mut delay = initial_delay;
         
+        let mut last_error = None;
         for attempt in 0..max_attempts {
             match operation() {
                 Ok(result) => return Ok(result),
-                Err(e) if attempt == max_attempts - 1 => return Err(e),
-                Err(_) => {
-                    std::thread::sleep(delay);
-                    delay = std::cmp::min(
-                        Duration::from_millis((delay.as_millis() as f64 * backoff_multiplier) as u64),
-                        max_delay,
-                    );
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempt < max_attempts - 1 {
+                        std::thread::sleep(delay);
+                        delay = std::cmp::min(
+                            Duration::from_millis((delay.as_millis() as f64 * backoff_multiplier) as u64),
+                            max_delay,
+                        );
+                    }
                 }
             }
         }
         
-        unreachable!()
+        Err(last_error.expect("retry loop should have at least one error"))
     }
     
     /// Create timeout-aware operation

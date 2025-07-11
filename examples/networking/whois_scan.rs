@@ -1,22 +1,22 @@
 //! BACnet Who-Is Scan Example
 //!
 //! This example demonstrates how to perform a Who-Is scan to discover
-//! BACnet devices on the network.
+//! BACnet devices on the network using the corrected service layer implementation.
 
 use bacnet_rs::{
     service::{WhoIsRequest, IAmRequest, UnconfirmedServiceChoice},
     network::Npdu,
+    datalink::{DataLink, DataLinkAddress, bip::BacnetIpDataLink},
     vendor::get_vendor_name,
 };
 use std::{
-    net::{SocketAddr, UdpSocket},
+    net::SocketAddr,
     time::{Duration, Instant},
     collections::HashMap,
-    thread,
 };
 
 /// Structure to hold discovered device information
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct DiscoveredDevice {
     device_id: u32,
     address: SocketAddr,
@@ -24,93 +24,102 @@ struct DiscoveredDevice {
     vendor_name: String,
     max_apdu: u32,
     segmentation: u32,
-    discovered_at: Instant,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("BACnet Who-Is Scan Example");
     println!("========================\n");
 
-    // Create a BACnet/IP data link on the default port
-    let local_addr = "0.0.0.0:47808";
-    println!("Creating BACnet/IP data link on {}...", local_addr);
+    // Create BACnet/IP data link (use 0 to let system choose port)
+    println!("Creating BACnet/IP data link...");
+    let mut datalink = BacnetIpDataLink::new("0.0.0.0:0")?;
     
-    let socket = UdpSocket::bind(local_addr)?;
-    socket.set_broadcast(true)?;
-    socket.set_read_timeout(Some(Duration::from_millis(100)))?;
-    
-    println!("Data link created successfully!");
+    println!("Data link created successfully");
     println!("Starting Who-Is scan...\n");
 
-    // Send Who-Is broadcast
+    // Create Who-Is request (broadcast to all devices)
     let whois = WhoIsRequest::new();
-    let mut buffer = Vec::new();
-    whois.encode(&mut buffer)?;
     
-    // Create NPDU for broadcast
-    let mut npdu = Npdu::new();
-    npdu.control.expecting_reply = true;
-    npdu.control.priority = 0; // Normal priority
+    // Encode the Who-Is service
+    let mut service_data = Vec::new();
+    whois.encode(&mut service_data)?;
     
+    // Create APDU (Application Protocol Data Unit)
+    let mut apdu_buffer = Vec::new();
+    apdu_buffer.push(0x10); // Unconfirmed Request PDU
+    apdu_buffer.push(UnconfirmedServiceChoice::WhoIs as u8);
+    apdu_buffer.extend_from_slice(&service_data);
+    
+    // Create NPDU using our corrected global broadcast
+    let npdu = Npdu::global_broadcast();
+    
+    // Encode NPDU
     let npdu_buffer = npdu.encode();
     
-    // Create unconfirmed service request APDU
-    let mut apdu = vec![0x10]; // Unconfirmed-Request PDU type
-    apdu.push(UnconfirmedServiceChoice::WhoIs as u8);
-    apdu.extend_from_slice(&buffer);
-    
     // Combine NPDU and APDU
-    let mut message = npdu_buffer.clone();
-    message.extend_from_slice(&apdu);
+    let mut message = npdu_buffer;
+    message.extend_from_slice(&apdu_buffer);
     
-    // Wrap in BVLC header for BACnet/IP
-    let mut bvlc_message = vec![
-        0x81, // BVLC Type
-        0x0B, // Original-Broadcast-NPDU
-        0x00, 0x00, // Length placeholder
-    ];
-    bvlc_message.extend_from_slice(&message);
+    // Send the Who-Is broadcast
+    println!("Sending Who-Is broadcast...");
+    match datalink.send_frame(&message, &DataLinkAddress::Broadcast) {
+        Ok(_) => println!("Broadcast sent successfully"),
+        Err(e) => println!("Warning: Broadcast failed: {:?}", e),
+    }
     
-    // Update BVLC length
-    let total_len = bvlc_message.len() as u16;
-    bvlc_message[2] = (total_len >> 8) as u8;
-    bvlc_message[3] = (total_len & 0xFF) as u8;
-    
-    // Send broadcast to 255.255.255.255:47808
-    let broadcast_addr: SocketAddr = "255.255.255.255:47808".parse()?;
-    socket.send_to(&bvlc_message, broadcast_addr)?;
-    println!("Who-Is broadcast sent!");
-    
-    // Also try local broadcast based on common network configurations
+    // Also try specific local subnet broadcasts
     let local_broadcasts = vec![
+        "10.161.1.255:47808",
         "192.168.1.255:47808",
         "192.168.0.255:47808",
-        "10.0.0.255:47808",
         "172.16.0.255:47808",
     ];
     
-    for addr in local_broadcasts {
-        if let Ok(broadcast) = addr.parse::<SocketAddr>() {
-            let _ = socket.send_to(&bvlc_message, broadcast);
+    for addr_str in &local_broadcasts {
+        if let Ok(addr) = addr_str.parse::<SocketAddr>() {
+            match datalink.send_frame(&message, &DataLinkAddress::Ip(addr)) {
+                Ok(_) => println!("Sent Who-Is to local broadcast: {}", addr),
+                Err(_) => {} // Ignore errors for unreachable broadcasts
+            }
         }
     }
     
-    println!("Waiting for I-Am responses...\n");
+    println!("\nListening for I-Am responses...\n");
     
-    // Listen for I-Am responses
+    // Listen for responses
     let mut discovered_devices: HashMap<u32, DiscoveredDevice> = HashMap::new();
-    let scan_start = Instant::now();
     let scan_duration = Duration::from_secs(5);
+    let start_time = Instant::now();
     
-    let mut recv_buffer = [0u8; 1500];
+    // Send periodic Who-Is broadcasts
+    let mut last_broadcast = Instant::now();
     
-    while scan_start.elapsed() < scan_duration {
-        match socket.recv_from(&mut recv_buffer) {
-            Ok((len, source)) => {
-                // Process received message
-                if let Some(device) = process_response(&recv_buffer[..len], source) {
+    while start_time.elapsed() < scan_duration {
+        // Re-broadcast every 2 seconds
+        if last_broadcast.elapsed() > Duration::from_secs(2) {
+            println!("Sending periodic Who-Is broadcast...");
+            match datalink.send_frame(&message, &DataLinkAddress::Broadcast) {
+                Ok(_) => {},
+                Err(_) => {},
+            }
+            last_broadcast = Instant::now();
+        }
+        
+        // Try to receive a response
+        match datalink.receive_frame() {
+            Ok((data, source)) => {
+                // Convert DataLinkAddress to SocketAddr for display
+                let source_addr = match source {
+                    DataLinkAddress::Ip(addr) => addr,
+                    _ => continue, // Skip non-IP addresses
+                };
+                
+                println!("Received {} bytes from {}", data.len(), source_addr);
+                
+                // Process the received message
+                if let Some(device) = process_response(&data, source_addr) {
                     if !discovered_devices.contains_key(&device.device_id) {
-                        println!("Discovered device:");
+                        println!("Discovered new device:");
                         println!("  Device ID: {}", device.device_id);
                         println!("  Address: {}", device.address);
                         println!("  Vendor: {} (ID: {})", device.vendor_name, device.vendor_id);
@@ -130,32 +139,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                // Timeout - continue scanning
-            }
-            Err(e) => {
-                eprintln!("Error receiving: {}", e);
+            Err(_) => {
+                // Timeout or error - normal during scanning
             }
         }
         
         // Show progress
-        let elapsed = scan_start.elapsed().as_secs();
-        if elapsed > 0 && elapsed % 1 == 0 {
-            print!("\rScanning... {} seconds elapsed", elapsed);
-            use std::io::{self, Write};
-            io::stdout().flush()?;
-        }
+        let elapsed = start_time.elapsed().as_secs();
+        print!("\rScanning... {} seconds elapsed, {} devices found", 
+            elapsed,
+            discovered_devices.len()
+        );
+        use std::io::{self, Write};
+        io::stdout().flush()?;
     }
     
-    println!("\n\nScan complete!");
-    println!("================");
+    println!("\n\nScan Complete!");
+    println!("==============");
     println!("Total devices discovered: {}", discovered_devices.len());
     
     if !discovered_devices.is_empty() {
         println!("\nDevice Summary:");
         println!("---------------");
         
-        // Sort by device ID for consistent output
+        // Sort by device ID
         let mut devices: Vec<_> = discovered_devices.values().collect();
         devices.sort_by_key(|d| d.device_id);
         
@@ -166,52 +173,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 device.vendor_name
             );
         }
-    }
-    
-    // Optionally, send targeted Who-Is to specific devices
-    if discovered_devices.len() > 0 {
-        println!("\nSending targeted Who-Is to first discovered device...");
-        
-        if let Some(device) = discovered_devices.values().next() {
-            let targeted_whois = WhoIsRequest::for_device(device.device_id);
-            let mut buffer = Vec::new();
-            targeted_whois.encode(&mut buffer)?;
-            
-            // Prepare targeted message (similar to above but unicast)
-            let mut targeted_apdu = vec![0x10]; // Unconfirmed-Request PDU type
-            targeted_apdu.push(UnconfirmedServiceChoice::WhoIs as u8);
-            targeted_apdu.extend_from_slice(&buffer);
-            
-            let mut targeted_message = npdu_buffer.clone();
-            targeted_message.extend_from_slice(&targeted_apdu);
-            
-            // BVLC for unicast
-            let mut targeted_bvlc = vec![
-                0x81, // BVLC Type
-                0x0A, // Original-Unicast-NPDU
-                0x00, 0x00, // Length placeholder
-            ];
-            targeted_bvlc.extend_from_slice(&targeted_message);
-            
-            let total_len = targeted_bvlc.len() as u16;
-            targeted_bvlc[2] = (total_len >> 8) as u8;
-            targeted_bvlc[3] = (total_len & 0xFF) as u8;
-            
-            socket.send_to(&targeted_bvlc, device.address)?;
-            println!("Targeted Who-Is sent to device {}", device.device_id);
-            
-            // Wait briefly for response
-            thread::sleep(Duration::from_millis(500));
-            
-            match socket.recv_from(&mut recv_buffer) {
-                Ok((len, source)) => {
-                    if process_response(&recv_buffer[..len], source).is_some() {
-                        println!("Received response from targeted Who-Is!");
-                    }
-                }
-                _ => println!("No response to targeted Who-Is"),
-            }
-        }
+    } else {
+        println!("\nNo devices found. Possible reasons:");
+        println!("- No BACnet devices on the network");
+        println!("- Devices are on a different subnet");
+        println!("- Firewall blocking BACnet traffic (UDP port 47808)");
+        println!("- Devices configured for different port");
     }
     
     Ok(())
@@ -219,45 +186,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Process a received message and extract I-Am information
 fn process_response(data: &[u8], source: SocketAddr) -> Option<DiscoveredDevice> {
-    // Check BVLC header
-    if data.len() < 4 || data[0] != 0x81 {
+    println!("  Raw data: {:02X?}", &data[..std::cmp::min(32, data.len())]);
+    
+    // The BacnetIpDataLink already strips the BVLC header, so we start with NPDU
+    if data.len() < 2 {
+        println!("  Too short for NPDU");
         return None;
     }
     
-    let bvlc_function = data[1];
-    let bvlc_length = ((data[2] as u16) << 8) | (data[3] as u16);
-    
-    if data.len() != bvlc_length as usize {
-        return None;
-    }
-    
-    // Skip BVLC header to get to NPDU
-    let npdu_start = match bvlc_function {
-        0x0A | 0x0B => 4, // Original-Unicast/Broadcast-NPDU
-        0x04 => 10, // Forwarded-NPDU (has original source address)
-        _ => return None,
-    };
-    
-    if data.len() <= npdu_start {
-        return None;
-    }
-    
-    // Decode NPDU
-    let (_npdu, npdu_len) = match Npdu::decode(&data[npdu_start..]) {
+    // Decode NPDU starting from the beginning of the data
+    let (_npdu, npdu_len) = match Npdu::decode(&data) {
         Ok(result) => result,
-        Err(_) => return None,
+        Err(e) => {
+            println!("  Failed to decode NPDU: {:?}", e);
+            return None;
+        }
     };
     
     // Skip to APDU
-    let apdu_start = npdu_start + npdu_len;
+    let apdu_start = npdu_len;
     if data.len() <= apdu_start {
+        println!("  Too short for APDU");
         return None;
     }
     
     let apdu = &data[apdu_start..];
     
     // Check if this is an unconfirmed I-Am service
-    if apdu.len() < 2 || apdu[0] != 0x10 {
+    if apdu.len() < 2 || apdu[0] != 0x10 {  // Unconfirmed Request PDU
         return None;
     }
     
@@ -284,7 +240,6 @@ fn process_response(data: &[u8], source: SocketAddr) -> Option<DiscoveredDevice>
                 vendor_name,
                 max_apdu: iam.max_apdu_length_accepted,
                 segmentation: iam.segmentation_supported,
-                discovered_at: Instant::now(),
             })
         }
         Err(_) => None,
