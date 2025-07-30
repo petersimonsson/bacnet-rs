@@ -294,8 +294,12 @@ fn analyze_device(socket: &UdpSocket, device: &mut BACnetDevice) -> Result<(), B
     
     if let Ok(name) = read_device_property(socket, device, PropertyIdentifier::ObjectName as u32) {
         if let Ok(parsed_name) = parse_string_from_response(&name) {
-            // Clean up device names with null bytes between characters like " G\0B\0S\0_\05\00\04\07"
-            let cleaned_name = parsed_name.chars().filter(|&c| c != '\0').collect::<String>();
+            // Clean up device names with null bytes and control characters
+            let cleaned_name = parsed_name.chars()
+                .filter(|&c| c != '\0' && !c.is_control())
+                .collect::<String>()
+                .trim()
+                .to_string();
             device.object_name = Some(cleaned_name.clone());
             println!("   Device Name: \"{}\"", cleaned_name);
         } else {
@@ -325,18 +329,36 @@ fn analyze_device(socket: &UdpSocket, device: &mut BACnetDevice) -> Result<(), B
         // Read details for each object (limit to avoid overwhelming output)
         if count > 1 { // More than just the device object
             println!("      Reading object details...");
-            let objects_to_read = std::cmp::min(device.objects.len(), 10); // Reasonable limit
+            let objects_to_read = device.objects.len(); // Read all objects
             for i in 0..objects_to_read {
                 // Read object name
                 if let Ok(name) = read_object_property_simple(socket, device, &device.objects[i], PropertyIdentifier::ObjectName as u32) {
                     if let Ok(parsed_name) = parse_string_from_response(&name) {
-                        device.objects[i].name = Some(parsed_name);
+                        // Clean up object names - remove null bytes and control characters
+                        let cleaned_name = parsed_name.chars()
+                            .filter(|&c| c != '\0' && !c.is_control())
+                            .collect::<String>()
+                            .trim()
+                            .to_string();
+                        
+                        // Validate the name - if it looks like binary garbage, skip it
+                        let printable_ratio = cleaned_name.chars()
+                            .filter(|&c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' || c == ' ' || c == '/')
+                            .count() as f32 / cleaned_name.len().max(1) as f32;
+                        
+                        if printable_ratio > 0.7 && cleaned_name.len() > 0 {
+                            device.objects[i].name = Some(cleaned_name);
+                        } else if cleaned_name.len() > 0 && cleaned_name.chars().all(|c| c.is_ascii_graphic() || c == ' ') {
+                            // Accept names that are all printable ASCII even if they don't meet the ratio test
+                            device.objects[i].name = Some(cleaned_name);
+                        }
                     }
                 }
                 
                 // Read present value for I/O objects
                 if is_io_object(device.objects[i].object_type) {
                     if let Ok(value) = read_object_property_simple(socket, device, &device.objects[i], PropertyIdentifier::PresentValue as u32) {
+                        // Special handling for binary objects
                         if let Ok(parsed_value) = parse_value_from_response(&value) {
                             device.objects[i].present_value = Some(parsed_value);
                         }
@@ -427,30 +449,100 @@ fn read_device_property(socket: &UdpSocket, device: &BACnetDevice, property_id: 
 }
 
 fn try_read_object_list_multiple_approaches(socket: &UdpSocket, device: &mut BACnetDevice) -> Result<usize, Box<dyn std::error::Error>> {
-    match read_device_property_simple(socket, device, PropertyIdentifier::ObjectList as u32) {
-        Ok(response) => {
-            if let Ok(objects) = parse_object_identifiers_from_response(&response) {
-                for obj_id in objects {
-                    let obj = BACnetObject {
-                        object_type: obj_id.object_type,
-                        instance: obj_id.instance,
-                        name: None,
-                        present_value: None,
-                        description: None,
-                    };
-                    device.objects.push(obj);
+    // First try to read the array length (index 0)
+    match read_property_with_array_index(socket, device, PropertyIdentifier::ObjectList as u32, 0) {
+        Ok(length_response) => {
+            // Parse the length - it might be a number like "84" or an encoded value
+            let length = if let Ok(len) = length_response.parse::<u32>() {
+                len
+            } else {
+                // Try to extract a number from the response
+                100 // Default max if we can't parse length
+            };
+            
+            // Read each object identifier by array index
+            for i in 1..=std::cmp::min(length, 200) { // Limit to 200 objects
+                match read_property_with_array_index(socket, device, PropertyIdentifier::ObjectList as u32, i) {
+                    Ok(obj_response) => {
+                        // Parse different response formats
+                        let mut parsed = false;
+                        
+                        // Format 1: "Object(type,instance)"
+                        if let Some(captures) = obj_response.strip_prefix("Object(").and_then(|s| s.strip_suffix(")")) {
+                            let parts: Vec<&str> = captures.split(',').collect();
+                            if parts.len() == 2 {
+                                if let (Ok(obj_type), Ok(instance)) = (parts[0].parse::<u16>(), parts[1].parse::<u32>()) {
+                                    if let Ok(object_type) = ObjectType::try_from(obj_type) {
+                                        let obj = BACnetObject {
+                                            object_type,
+                                            instance,
+                                            name: None,
+                                            present_value: None,
+                                            description: None,
+                                        };
+                                        device.objects.push(obj);
+                                        parsed = true;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Format 2: "Objects: [TYPE:instance]"
+                        if !parsed && obj_response.starts_with("Objects: [") && obj_response.ends_with("]") {
+                            let objects_str = &obj_response[10..obj_response.len()-1];
+                            if let Some(colon_pos) = objects_str.find(':') {
+                                let type_str = &objects_str[..colon_pos];
+                                let instance_str = &objects_str[colon_pos+1..];
+                                
+                                if let Ok(instance) = instance_str.parse::<u32>() {
+                                    let object_type = match type_str {
+                                        "DEV" => Some(ObjectType::Device),
+                                        "AI" => Some(ObjectType::AnalogInput),
+                                        "AO" => Some(ObjectType::AnalogOutput),
+                                        "AV" => Some(ObjectType::AnalogValue),
+                                        "BI" => Some(ObjectType::BinaryInput),
+                                        "BO" => Some(ObjectType::BinaryOutput),
+                                        "BV" => Some(ObjectType::BinaryValue),
+                                        "MSI" => Some(ObjectType::MultiStateInput),
+                                        "MSO" => Some(ObjectType::MultiStateOutput),
+                                        "MSV" => Some(ObjectType::MultiStateValue),
+                                        _ => None,
+                                    };
+                                    
+                                    if let Some(obj_type) = object_type {
+                                        let obj = BACnetObject {
+                                            object_type: obj_type,
+                                            instance,
+                                            name: None,
+                                            present_value: None,
+                                            description: None,
+                                        };
+                                        device.objects.push(obj);
+                                        parsed = true;
+                                    }
+                                }
+                            }
+                        }
+                        
+                    }
+                    Err(_) => {
+                        // End of array or error, stop reading
+                        break;
+                    }
                 }
+                std::thread::sleep(Duration::from_millis(50)); // Small delay between reads
+            }
+            
+            if !device.objects.is_empty() {
                 return Ok(device.objects.len());
             }
         }
-        Err(_) => {},
+        Err(_) => {
+            // Could not read array length, try fallback methods
+        }
     }
     
-    match read_device_property_alternative(socket, device, PropertyIdentifier::ObjectList as u32) {
-        Ok(_) => return Ok(0),
-        Err(_) => {},
-    }
-    
+    // Fallback to other methods
     read_object_list(socket, device)
 }
 
@@ -528,7 +620,7 @@ fn read_object_list(socket: &UdpSocket, device: &mut BACnetDevice) -> Result<usi
         Ok(length_str) => {
             if let Ok(length) = length_str.parse::<u32>() {
                 // Read each object identifier
-                for i in 1..=std::cmp::min(length, 50) {
+                for i in 1..=std::cmp::min(length, 100) {
                     match read_property_with_array_index(socket, device, PropertyIdentifier::ObjectList as u32, i) {
                         Ok(obj_data) => {
                             if let Ok(obj_id) = parse_object_identifier(&obj_data) {
@@ -729,7 +821,7 @@ fn send_request_and_get_response(socket: &UdpSocket, device: &BACnetDevice, apdu
                                 if pdu_type == 0x3 { // Complex ACK
                                     if apdu_data.len() >= 2 && apdu_data[1] == 0x0C {
                                         if let Ok(response) = ReadPropertyResponse::decode(&apdu_data[2..]) {
-                                            return extract_string_value(&response.property_value);
+                                            return decode_bacnet_value(&response.property_value);
                                         }
                                     }
                                     // Try to parse as raw property data
@@ -795,10 +887,7 @@ fn display_comprehensive_summary(devices: &HashMap<u32, BACnetDevice>) {
             println!("   OBJECTS ({}):", device.objects.len());
             
             for (i, obj) in device.objects.iter().enumerate() {
-                if i >= 15 { // Limit display to first 15 objects
-                    println!("      ... and {} more objects", device.objects.len() - 15);
-                    break;
-                }
+                // No limit - print all objects
                 
                 let obj_name = obj.name.as_deref().unwrap_or("<unnamed>");
                 let type_name = object_type_name(obj.object_type);
@@ -858,66 +947,45 @@ fn parse_object_identifier(data: &str) -> Result<BACnetObjectId, Box<dyn std::er
 }
 
 fn parse_object_list_response(data: &str) -> Result<Vec<BACnetObjectId>, Box<dyn std::error::Error>> {
-    let mut objects = Vec::new();
+    // Handle "Objects: [...]" format from parse_raw_response
+    if data.starts_with("Objects: [") && data.ends_with("]") {
+        return parse_object_identifiers_from_response(data);
+    }
     
-    // Try to parse as hex string containing multiple object identifiers
+    // Try to parse as hex string
     if data.starts_with("0x") {
-        let hex_data = &data[2..];
-        
-        // Each object identifier is 4 bytes (8 hex characters)
-        if hex_data.len() % 8 == 0 {
-            for i in (0..hex_data.len()).step_by(8) {
-                if i + 8 <= hex_data.len() {
-                    let obj_hex = &hex_data[i..i+8];
-                    let obj_data = format!("0x{}", obj_hex);
-                    
-                    if let Ok(obj_id) = parse_object_identifier(&obj_data) {
-                        objects.push(obj_id);
-                    }
-                }
-            }
+        let hex_str = &data[2..];
+        if let Ok(bytes) = decode_hex(hex_str) {
+            return parse_object_list_from_bytes(&bytes);
         }
     }
     
-    if objects.is_empty() {
-        Err("No objects found in response".into())
-    } else {
-        Ok(objects)
-    }
+    Err("No objects found in response".into())
 }
 
 fn parse_object_list_from_bytes(data: &[u8]) -> Result<Vec<BACnetObjectId>, Box<dyn std::error::Error>> {
     let mut objects = Vec::new();
     let mut i = 0;
     
-    // Check if this starts with an array tag or property value tag
-    if data.len() > 0 && data[0] == 0x3E {
-        // Context tag 3 with extended length - skip tag and length
-        i = 1;
-        while i < data.len() && (data[i] & 0x07) == 0x07 {
+    // Skip any initial context tags
+    while i < data.len() && (data[i] == 0x3E || data[i] == 0x30) {
+        if data[i] == 0x3E {
+            // Context tag with possible extended length
+            i += 1;
+            while i < data.len() && (data[i] & 0x07) == 0x07 {
+                i += 1;
+            }
+            if i < data.len() {
+                i += 1; // Skip the length byte
+            }
+        } else {
             i += 1;
         }
-    } else if data.len() > 0 && data[0] == 0x74 {
-        // This is the start of object data
-        i = 0; // Start from beginning
     }
     
     // Look for object identifier patterns (C4 XX XX XX XX)
-    while i + 6 < data.len() { // Need 7 bytes total for C4 + 4 bytes + next pattern
-        if data[i] == 0xC4 && data[i+5] == 0xC4 { // Object identifier tag followed by another
-            let obj_bytes = [data[i+1], data[i+2], data[i+3], data[i+4]];
-            let obj_id_value = u32::from_be_bytes(obj_bytes);
-            let object_type_num = (obj_id_value >> 22) & 0x3FF;
-            let instance = obj_id_value & 0x3FFFFF;
-            
-            if let Ok(object_type) = ObjectType::try_from(object_type_num as u16) {
-                objects.push(BACnetObjectId {
-                    object_type,
-                    instance,
-                });
-            }
-            i += 5;
-        } else if data[i] == 0xC4 { // Handle last object or single object
+    while i + 4 < data.len() {
+        if data[i] == 0xC4 && i + 4 < data.len() {
             let obj_bytes = [data[i+1], data[i+2], data[i+3], data[i+4]];
             let obj_id_value = u32::from_be_bytes(obj_bytes);
             let object_type_num = (obj_id_value >> 22) & 0x3FF;
@@ -934,6 +1002,7 @@ fn parse_object_list_from_bytes(data: &[u8]) -> Result<Vec<BACnetObjectId>, Box<
             i += 1;
         }
     }
+    
     Ok(objects)
 }
 
@@ -984,6 +1053,8 @@ fn parse_object_identifiers_from_response(response: &str) -> Result<Vec<BACnetOb
 }
 
 fn parse_raw_response(apdu_data: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
+    // Keep the original logic but use hex crate for encoding
+    
     // Skip the ACK header and service choice if present
     let start_idx = if apdu_data.len() > 2 && apdu_data[0] == 0x30 && apdu_data[1] == 0x0C {
         2 // Skip complex ACK header
@@ -994,24 +1065,9 @@ fn parse_raw_response(apdu_data: &[u8]) -> Result<String, Box<dyn std::error::Er
     if apdu_data.len() > start_idx {
         let data = &apdu_data[start_idx..];
         
-        // Look for string data - try different context tags and locations
-        for i in 0..data.len() {
-            // Check for character string tags (0x74 or 0x75)
-            if i < data.len() && (data[i] == 0x74 || data[i] == 0x75) {
-                if let Ok(string_val) = extract_string_value(&data[i..]) {
-                    return Ok(string_val);
-                }
-            }
-            
-            // Check for context-tagged string (tag 3 with extended format)
-            if i + 4 < data.len() && data[i] == 0x3E {
-                // Skip tag and look for string
-                if data[i+2] == 0x74 || data[i+2] == 0x75 {
-                    if let Ok(string_val) = extract_string_value(&data[i+2..]) {
-                        return Ok(string_val);
-                    }
-                }
-            }
+        // Try to decode as BACnet value
+        if let Ok(value) = decode_bacnet_value(data) {
+            return Ok(value);
         }
     }
     
@@ -1043,36 +1099,22 @@ fn parse_raw_response(apdu_data: &[u8]) -> Result<String, Box<dyn std::error::Er
             // Skip to actual data and try to extract string value
             for i in 0..apdu_data.len() {
                 if apdu_data[i] == 0x75 || apdu_data[i] == 0x74 {
-                    // Try to decode the string instead of returning hex
-                    if let Ok(string_val) = extract_string_value(&apdu_data[i..]) {
-                        return Ok(string_val);
+                    // Try to decode the value
+                    if let Ok(value) = decode_bacnet_value(&apdu_data[i..]) {
+                        return Ok(value);
                     }
-                    // If string extraction fails, fall back to hex
-                    let hex_str = apdu_data[i..].iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join("");
-                    return Ok(format!("0x{}", hex_str));
+                    // If decoding fails, fall back to hex using hex crate
+                    return Ok(format!("0x{}", hex::encode(&apdu_data[i..])));
                 }
             }
         }
-        let hex_str = apdu_data.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join("");
-        Ok(format!("0x{}", hex_str))
+        // Use hex crate for final fallback
+        Ok(format!("0x{}", hex::encode(apdu_data)))
     }
 }
 
 fn decode_hex(hex_str: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    if hex_str.len() % 2 != 0 {
-        return Err("Hex string length must be even".into());
-    }
-    
-    let mut bytes = Vec::new();
-    for i in (0..hex_str.len()).step_by(2) {
-        let byte_str = &hex_str[i..i+2];
-        if let Ok(byte) = u8::from_str_radix(byte_str, 16) {
-            bytes.push(byte);
-        } else {
-            return Err("Invalid hex character".into());
-        }
-    }
-    Ok(bytes)
+    hex::decode(hex_str).map_err(|e| e.to_string().into())
 }
 
 fn parse_string_from_response(response: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -1080,28 +1122,14 @@ fn parse_string_from_response(response: &str) -> Result<String, Box<dyn std::err
     if response.starts_with("0x") {
         let hex_str = &response[2..];
         if let Ok(bytes) = decode_hex(hex_str) {
-            // Check if this is already a BACnet string (starts with 0x74 or 0x75)
-            if !bytes.is_empty() && (bytes[0] == 0x74 || bytes[0] == 0x75) {
-                return extract_string_value(&bytes);
-            }
-            // Otherwise try to extract from the full response
-            return extract_string_value(&bytes);
+            // Try multiple approaches to extract the string
+            
+            // Use universal decoder
+            return decode_bacnet_value(&bytes);
         }
     }
-    // Handle our custom response format
-    if response.starts_with("Raw: ") {
-        let hex_str = &response[5..];
-        if let Ok(bytes) = decode_hex(hex_str) {
-            return extract_string_value(&bytes);
-        }
-    }
-    // Final cleanup - remove excessive spaces even if we didn't decode from hex
-    let space_count = response.chars().filter(|&c| c == ' ').count();
-    if space_count > 3 {
-        Ok(response.split_whitespace().collect::<Vec<&str>>().join(""))
-    } else {
-        Ok(response.to_string())
-    }
+    // Clean up raw string responses
+    Ok(response.trim_end_matches('\0').trim().to_string())
 }
 
 fn parse_value_from_response(response: &str) -> Result<String, Box<dyn std::error::Error>> {
@@ -1109,356 +1137,267 @@ fn parse_value_from_response(response: &str) -> Result<String, Box<dyn std::erro
     if response.starts_with("0x") {
         let hex_str = &response[2..];
         if let Ok(bytes) = decode_hex(hex_str) {
-            // Try to extract boolean value first (for binary objects)
-            if let Ok(bool_val) = extract_boolean_value(&bytes) {
-                return Ok(bool_val);
-            }
-            // Try numeric value (including multi-state values)
-            if let Ok(num_val) = extract_numeric_value(&bytes) {
-                return Ok(num_val);
-            }
-            // Try to extract multi-state value from complex ACK
-            if let Ok(msv_val) = extract_msv_value(&bytes) {
-                return Ok(msv_val);
-            }
-        }
-    }
-    // Handle our custom response format  
-    if response.starts_with("Raw: ") {
-        let hex_str = &response[5..];
-        if let Ok(bytes) = decode_hex(hex_str) {
-            return extract_numeric_value(&bytes);
+            // Use universal BACnet decoder
+            return decode_bacnet_value(&bytes);
         }
     }
     Ok(response.to_string())
 }
 
-fn parse_units_from_response(response: &str) -> Result<String, Box<dyn std::error::Error>> {
-    // Handle our custom response format
-    if response.starts_with("Raw: ") {
-        let hex_str = &response[5..];
-        if let Ok(bytes) = decode_hex(hex_str) {
-            return extract_units_value(&bytes);
-        }
-    }
-    Ok(response.to_string())
-}
-
-fn extract_numeric_value(data: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
+// Universal BACnet value decoder based on application tag types
+fn decode_bacnet_value(data: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
     if data.is_empty() {
         return Ok("(empty)".to_string());
     }
     
-    // First skip any BACnet Complex ACK headers if present
-    let start_idx = if data.len() > 2 && data[0] == 0x30 {
-        // Skip complex ACK header and service choice
-        let mut idx = 2;
-        // Skip past object identifier and property identifier tags
-        while idx < data.len() && (data[idx] == 0x0C || data[idx] == 0x19) {
-            if data[idx] == 0x0C {
-                idx += 5; // Context tag 0 + 4 bytes object ID
-            } else if data[idx] == 0x19 {
-                idx += 2; // Context tag 1 + 1 byte property ID
-            }
-        }
-        idx
-    } else {
-        0
-    };
-    
-    // Look for IEEE 754 float patterns in the hex data
-    for i in start_idx..data.len().saturating_sub(3) {
-        if data[i] == 0x44 && i + 4 < data.len() {
-            let bytes = [data[i+1], data[i+2], data[i+3], data[i+4]];
-            let value = f32::from_be_bytes(bytes);
-            if value.is_finite() && value.abs() < 1000000.0 { // Reasonable range check
-                return Ok(format!("{:.2}", value));
+    // Skip BACnet Complex ACK header if present
+    let mut idx = 0;
+    if data.len() > 2 && data[0] == 0x30 {
+        idx = 2;
+        // Skip object identifier and property identifier context tags
+        while idx < data.len() {
+            match data[idx] >> 4 {
+                0x0 | 0x1 => idx += 2 + (data[idx] & 0x07) as usize, // Context tags
+                _ => break,
             }
         }
     }
     
-    // Check from start_idx for other value types
-    if start_idx < data.len() {
-        let check_data = &data[start_idx..];
-        
-        // Real value at start
-        if check_data.len() >= 5 && check_data[0] == 0x44 {
-            let bytes = [check_data[1], check_data[2], check_data[3], check_data[4]];
-            let value = f32::from_be_bytes(bytes);
-            return Ok(format!("{:.2}", value));
-        }
-        
-        // Unsigned integer
-        if check_data.len() > 0 && (check_data[0] & 0xF0) == 0x20 {
-            let len = (check_data[0] & 0x07) as usize;
-            if len <= 4 && check_data.len() > len {
-                let mut value = 0u32;
-                for i in 0..len {
-                    value = (value << 8) | (check_data[1 + i] as u32);
+    // Skip opening tag if present
+    if idx < data.len() && data[idx] == 0x3E {
+        idx += 1;
+    }
+    
+    // Parse BACnet application tags from this position
+    if idx < data.len() {
+        return parse_bacnet_application_tag(&data[idx..]);
+    }
+    
+    // Fallback - hex encode
+    Ok(format!("0x{}", hex::encode(data)))
+}
+
+fn parse_units_from_response(response: &str) -> Result<String, Box<dyn std::error::Error>> {
+    // Handle hex response starting with 0x
+    if response.starts_with("0x") {
+        let hex_str = &response[2..];
+        if let Ok(bytes) = decode_hex(hex_str) {
+            // Use universal decoder - units will be returned as enumerated values
+            if let Ok(value) = decode_bacnet_value(&bytes) {
+                // Convert common unit enumerations to readable names
+                match value.as_str() {
+                    "95" => return Ok("degrees-celsius".to_string()),
+                    "96" => return Ok("degrees-fahrenheit".to_string()),
+                    "98" => return Ok("percent".to_string()),
+                    "99" => return Ok("percent-relative-humidity".to_string()),
+                    _ => return Ok(value),
                 }
-                return Ok(value.to_string());
-            }
-        }
-        
-        // Check for unsigned integer with tag 0x21 (common for MSV)
-        for i in 0..check_data.len() {
-            if check_data[i] == 0x21 && i + 1 < check_data.len() {
-                let value = check_data[i+1] as u32;
-                return Ok(value.to_string());
             }
         }
     }
-    
-    // Boolean
-    if data[0] == 0x11 && data.len() >= 2 {
-        return Ok(if data[1] == 0 { "false".to_string() } else { "true".to_string() });
-    }
-    
-    // Enumerated
-    if (data[0] & 0xF0) == 0x90 {
-        let len = (data[0] & 0x07) as usize;
-        if len <= 4 && data.len() > len {
-            let mut value = 0u32;
-            for i in 0..len {
-                value = (value << 8) | (data[1 + i] as u32);
-            }
-            return Ok(format!("enum({})", value));
-        }
-    }
-    
-    // Fallback to hex
-    let hex_str = data.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join("");
-    Ok(format!("0x{}", hex_str))
+    Ok(response.to_string())
 }
 
-fn extract_units_value(data: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
-    if data.is_empty() {
-        return Ok("(none)".to_string());
-    }
-    
-    // Enumerated units
-    if (data[0] & 0xF0) == 0x90 {
-        let len = (data[0] & 0x07) as usize;
-        if len <= 4 && data.len() > len {
-            let mut value = 0u32;
-            for i in 0..len {
-                value = (value << 8) | (data[1 + i] as u32);
-            }
-            
-            // Common BACnet engineering units
-            let unit_name = match value {
-                95 => "degrees-celsius",
-                96 => "degrees-fahrenheit", 
-                98 => "percent",
-                99 => "percent-relative-humidity",
-                118 => "volts",
-                119 => "kilovolts",
-                120 => "millivolts",
-                121 => "amperes",
-                122 => "milliamperes",
-                123 => "kiloamperes",
-                132 => "watts",
-                133 => "kilowatts",
-                159 => "pascals",
-                160 => "kilopascals",
-                162 => "bars",
-                _ => return Ok(format!("unit-{}", value)),
-            };
-            
-            return Ok(unit_name.to_string());
-        }
-    }
-    
-    Ok("unknown".to_string())
-}
-
-fn extract_boolean_value(data: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
+// Parse BACnet application tags according to the protocol specification
+fn parse_bacnet_application_tag(data: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
     if data.is_empty() {
         return Err("Empty data".into());
     }
     
-    // Look for boolean values (tag 0x10 for false, 0x11 for true)
-    for i in 0..data.len() {
-        if data[i] == 0x10 {
-            return Ok("false".to_string());
-        } else if data[i] == 0x11 {
-            return Ok("true".to_string());
+    let tag = data[0];
+    let tag_number = (tag >> 4) & 0x0F;
+    let length_value_type = tag & 0x07;
+    
+    // Determine the length of the data
+    let (data_len, data_start) = if tag & 0x08 != 0 {
+        // Extended tag
+        if data.len() < 2 {
+            return Err("Incomplete extended tag".into());
         }
-        // BACnet boolean enumeration (0x91 tag followed by value)
-        else if data[i] == 0x91 && i + 1 < data.len() {
-            match data[i + 1] {
-                0x00 => return Ok("false".to_string()),
-                0x01 => return Ok("true".to_string()),
-                _ => continue,
-            }
+        (0, 1) // Extended tags handled differently
+    } else if length_value_type <= 4 {
+        // Length is in the tag
+        (length_value_type as usize, 1)
+    } else if length_value_type == 5 {
+        // Length in next octet
+        if data.len() < 2 {
+            return Err("Incomplete length encoding".into());
         }
-    }
-    
-    Err("No boolean value found".into())
-}
-
-fn extract_msv_value(data: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
-    // Look for multi-state value patterns in BACnet responses
-    // Common patterns: 
-    // - Complex ACK with value between opening/closing tags (3E ... 3F)
-    // - Direct unsigned integer encoding (21 XX)
-    
-    // Look for pattern with opening tag 3E
-    for i in 0..data.len() {
-        if data[i] == 0x3E && i + 3 < data.len() {
-            // Check for unsigned integer after opening tag
-            if data[i+1] == 0x21 {
-                let value = data[i+2] as u32;
-                return Ok(value.to_string());
-            }
-            // Check for longer unsigned values
-            if data[i+1] == 0x22 && i + 4 < data.len() {
-                let value = ((data[i+2] as u32) << 8) | (data[i+3] as u32);
-                return Ok(value.to_string());
-            }
-        }
-        
-        // Also check for direct unsigned integer encoding without tags
-        if data[i] == 0x21 && i + 1 < data.len() {
-            let value = data[i+1] as u32;
-            // Sanity check - MSV values are typically small numbers
-            if value < 100 {
-                return Ok(value.to_string());
-            }
-        }
-    }
-    
-    Err("No multi-state value found".into())
-}
-
-fn extract_string_value(data: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
-    if data.is_empty() {
-        return Ok("(empty)".to_string());
-    }
-    
-    
-    // Character string
-    if data[0] == 0x74 || data[0] == 0x75 {
-        let (len, start) = if data[0] == 0x74 {
-            (data[1] as usize, 2)
-        } else if data[0] == 0x75 && data.len() > 2 {
-            // For 0x75, length can be 1 or 2 bytes
-            if data[1] & 0x80 == 0 {
-                // Single byte length
-                (data[1] as usize, 2)
-            } else {
-                // Two byte length (but for 0x75 13, it's single byte)
-                (data[1] as usize, 2)
-            }
+        let len = data[1] as usize;
+        if len == 254 && data.len() >= 4 {
+            // 2-byte length
+            ((data[2] as usize) << 8 | data[3] as usize, 4)
+        } else if len == 255 && data.len() >= 6 {
+            // 4-byte length
+            ((data[2] as usize) << 24 | (data[3] as usize) << 16 | 
+             (data[4] as usize) << 8 | data[5] as usize, 6)
         } else {
-            return Err("Invalid string format".into());
-        };
-        
-        if data.len() >= start + len {
-            let string_data = &data[start..start + len];
-            
-            // First, try direct UTF-8 decoding (skip the first byte if it's 0x00 - might be charset)
-            if string_data.len() > 0 {
-                let actual_string_data = if string_data[0] == 0x00 && string_data.len() > 1 {
-                    &string_data[1..] // Skip first byte if it's 0x00 (charset indicator)
-                } else {
-                    string_data
-                };
-                
-                // Try UTF-8 first
-                if let Ok(utf8_string) = std::str::from_utf8(actual_string_data) {
-                    // Remove null terminator if present
-                    let trimmed = utf8_string.trim_end_matches('\0').trim_end_matches('?');
-                    // Also remove excessive spaces from UTF-8 decoded strings
-                    let space_count = trimmed.chars().filter(|&c| c == ' ').count();
-                    let result = if space_count > 3 || trimmed.contains("  ") {
-                        // Too many spaces - join without spaces
-                        trimmed.split_whitespace().collect::<Vec<&str>>().join("")
-                    } else {
-                        trimmed.to_string()
-                    };
-                    return Ok(result);
-                }
+            (len, 2)
+        }
+    } else {
+        // Reserved
+        return Err("Reserved length encoding".into());
+    };
+    
+    // Make sure we have enough data
+    if data.len() < data_start + data_len {
+        return Err("Insufficient data for tag value".into());
+    }
+    
+    let value_data = &data[data_start..data_start + data_len];
+    
+    // Parse based on tag number (BACnet application tags)
+    match tag_number {
+        0 => { // Null
+            Ok("null".to_string())
+        },
+        1 => { // Boolean
+            if length_value_type == 0 {
+                Ok("false".to_string())
+            } else {
+                Ok("true".to_string())
             }
-            
-            // Check if this looks like UTF-16BE (first byte is 0x00 for ASCII chars)
-            if string_data.len() > 2 && string_data.len() % 2 == 0 {
-                let mut is_utf16 = true;
-                // Check if this might be UTF-16BE by looking for 0x00 as first byte of pairs
-                for i in (0..string_data.len()).step_by(2) {
-                    if i < string_data.len() - 1 {
-                        // For ASCII chars in UTF-16BE, first byte should be 0x00
-                        if string_data[i] == 0x00 && string_data[i+1] < 0x80 {
-                            // This looks like UTF-16BE
-                        } else if string_data[i] < 0x80 && string_data[i+1] == 0x00 {
-                            // This looks like UTF-16LE  
-                            is_utf16 = false;
-                            break;
-                        }
-                    }
+        },
+        2 => { // Unsigned Integer
+            let mut value = 0u64;
+            for &byte in value_data {
+                value = (value << 8) | (byte as u64);
+            }
+            Ok(value.to_string())
+        },
+        3 => { // Signed Integer
+            let mut value = 0i64;
+            for &byte in value_data {
+                value = (value << 8) | (byte as i64);
+            }
+            // Sign extend if necessary
+            if value_data.len() > 0 && value_data.len() < 8 && (value_data[0] & 0x80) != 0 {
+                let shift = 64 - (value_data.len() * 8);
+                value = (value << shift) >> shift;
+            }
+            Ok(value.to_string())
+        },
+        4 => { // Real (single precision)
+            if value_data.len() == 4 {
+                let bytes = [value_data[0], value_data[1], value_data[2], value_data[3]];
+                let value = f32::from_be_bytes(bytes);
+                if value.is_finite() {
+                    Ok(format!("{:.2}", value))
+                } else {
+                    Ok("NaN".to_string())
                 }
-                
-                if is_utf16 {
-                    // Extract UTF-16BE string
-                    let mut utf16_values = Vec::new();
-                    for i in (0..string_data.len()).step_by(2) {
-                        if i + 1 < string_data.len() {
-                            let value = ((string_data[i] as u16) << 8) | (string_data[i+1] as u16);
-                            utf16_values.push(value);
+            } else {
+                Err("Invalid REAL length".into())
+            }
+        },
+        5 => { // Double (double precision)
+            if value_data.len() == 8 {
+                let bytes = [
+                    value_data[0], value_data[1], value_data[2], value_data[3],
+                    value_data[4], value_data[5], value_data[6], value_data[7]
+                ];
+                let value = f64::from_be_bytes(bytes);
+                if value.is_finite() {
+                    Ok(format!("{:.2}", value))
+                } else {
+                    Ok("NaN".to_string())
+                }
+            } else {
+                Err("Invalid DOUBLE length".into())
+            }
+        },
+        6 => { // Octet String
+            Ok(format!("0x{}", hex::encode(value_data)))
+        },
+        7 => { // Character String
+            // First byte is character set
+            if value_data.len() > 0 {
+                let charset = value_data[0];
+                let string_data = &value_data[1..];
+                match charset {
+                    0 => { // ANSI X3.4 / UTF-8
+                        match std::str::from_utf8(string_data) {
+                            Ok(s) => Ok(s.to_string()),
+                            Err(_) => Ok(format!("(invalid UTF-8: 0x{})", hex::encode(string_data)))
                         }
-                    }
-                    if let Ok(decoded) = String::from_utf16(&utf16_values) {
-                        let trimmed = decoded.trim_end_matches('\0').trim_end_matches('?');
-                        // Always remove excessive spaces from any decoded string
-                        let result = if trimmed.contains(' ') {
-                            // Check if there are multiple consecutive spaces or many spaces
-                            let space_count = trimmed.chars().filter(|&c| c == ' ').count();
-                            if space_count > 3 || trimmed.contains("  ") {
-                                // Too many spaces - join without spaces
-                                trimmed.split_whitespace().collect::<Vec<&str>>().join("")
-                            } else {
-                                trimmed.to_string()
+                    },
+                    1 => { // ISO 8859-1
+                        Ok(string_data.iter().map(|&b| b as char).collect())
+                    },
+                    3 | 4 => { // ISO 10646 (UCS-2) or ISO 10646 (UCS-4) 
+                        if string_data.len() % 2 == 0 {
+                            let mut utf16_values = Vec::new();
+                            for i in (0..string_data.len()).step_by(2) {
+                                let value = ((string_data[i] as u16) << 8) | (string_data[i+1] as u16);
+                                utf16_values.push(value);
+                            }
+                            match String::from_utf16(&utf16_values) {
+                                Ok(s) => Ok(s),
+                                Err(_) => Ok(format!("(invalid UTF-16: 0x{})", hex::encode(string_data)))
                             }
                         } else {
-                            trimmed.to_string()
-                        };
-                        return Ok(result);
-                    }
+                            Ok(format!("(odd UTF-16 length: 0x{})", hex::encode(string_data)))
+                        }
+                    },
+                    _ => Ok(format!("(charset {}: 0x{})", charset, hex::encode(string_data)))
                 }
+            } else {
+                Ok("".to_string())
             }
-            
-            // Fall back to UTF-8
-            return Ok(String::from_utf8_lossy(string_data).to_string());
-        }
-    }
-    
-    // Unsigned integer
-    if (data[0] & 0xF0) == 0x20 {
-        let len = (data[0] & 0x07) as usize;
-        if len <= 4 && data.len() > len {
+        },
+        8 => { // Bit String
+            if value_data.len() > 0 {
+                let unused_bits = value_data[0];
+                let bit_data = &value_data[1..];
+                Ok(format!("bits({} unused): 0x{}", unused_bits, hex::encode(bit_data)))
+            } else {
+                Ok("bits()".to_string())
+            }
+        },
+        9 => { // Enumerated
             let mut value = 0u32;
-            for i in 0..len {
-                value = (value << 8) | (data[1 + i] as u32);
+            for &byte in value_data {
+                value = (value << 8) | (byte as u32);
             }
-            return Ok(value.to_string());
+            Ok(value.to_string())
+        },
+        10 => { // Date
+            if value_data.len() == 4 {
+                let year = 1900 + value_data[0] as i32;
+                let month = value_data[1];
+                let day = value_data[2];
+                let dow = value_data[3];
+                Ok(format!("{:04}-{:02}-{:02} (dow:{})", year, month, day, dow))
+            } else {
+                Err("Invalid DATE length".into())
+            }
+        },
+        11 => { // Time
+            if value_data.len() == 4 {
+                let hour = value_data[0];
+                let minute = value_data[1];
+                let second = value_data[2];
+                let hundredths = value_data[3];
+                Ok(format!("{:02}:{:02}:{:02}.{:02}", hour, minute, second, hundredths))
+            } else {
+                Err("Invalid TIME length".into())
+            }
+        },
+        12 => { // BACnetObjectIdentifier
+            if value_data.len() == 4 {
+                let obj_id = u32::from_be_bytes([value_data[0], value_data[1], value_data[2], value_data[3]]);
+                let obj_type = (obj_id >> 22) & 0x3FF;
+                let instance = obj_id & 0x3FFFFF;
+                Ok(format!("Object({},{})", obj_type, instance))
+            } else {
+                Err("Invalid ObjectIdentifier length".into())
+            }
+        },
+        _ => {
+            // Unknown or reserved tag
+            Ok(format!("Tag{}:0x{}", tag_number, hex::encode(value_data)))
         }
     }
-    
-    // Real value
-    if data[0] == 0x44 && data.len() >= 5 {
-        let bytes = [data[1], data[2], data[3], data[4]];
-        let value = f32::from_be_bytes(bytes);
-        return Ok(format!("{:.2}", value));
-    }
-    
-    // Boolean
-    if data[0] == 0x11 && data.len() >= 2 {
-        return Ok(if data[1] == 0 { "false".to_string() } else { "true".to_string() });
-    }
-    
-    // Fallback to hex
-    let hex_str = data.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join("");
-    Ok(format!("0x{}", hex_str))
 }
 
 fn object_type_name(obj_type: ObjectType) -> &'static str {
