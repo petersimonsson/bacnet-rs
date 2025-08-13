@@ -47,18 +47,18 @@
 //! ## Encoding Basic Types
 //!
 //! ```rust
-//! use bacnet_rs::encoding::{encode_application_unsigned, encode_application_real, encode_application_boolean};
+//! use bacnet_rs::encoding::{encode_unsigned, encode_real, encode_boolean};
 //!
 //! let mut buffer = Vec::new();
 //!
 //! // Encode an unsigned integer
-//! encode_application_unsigned(&mut buffer, 42).unwrap();
+//! encode_unsigned(&mut buffer, 42).unwrap();
 //!
 //! // Encode a real number
-//! encode_application_real(&mut buffer, 23.5).unwrap();
+//! encode_real(&mut buffer, 23.5).unwrap();
 //!
 //! // Encode a boolean
-//! encode_application_boolean(&mut buffer, true).unwrap();
+//! encode_boolean(&mut buffer, true).unwrap();
 //!
 //! println!("Encoded {} bytes", buffer.len());
 //! ```
@@ -66,13 +66,13 @@
 //! ## Decoding Basic Types
 //!
 //! ```rust
-//! use bacnet_rs::encoding::{decode_application_unsigned, decode_application_real, ApplicationTag};
+//! use bacnet_rs::encoding::{decode_unsigned, decode_real, ApplicationTag};
 //!
 //! // Sample encoded data (tag + value)
 //! let data = vec![0x21, 0x2A]; // Unsigned integer 42
 //!
 //! // Decode the value
-//! let (value, consumed) = decode_application_unsigned(&data).unwrap();
+//! let (value, consumed) = decode_unsigned(&data).unwrap();
 //! assert_eq!(value, 42);
 //! assert_eq!(consumed, 2);
 //! ```
@@ -80,11 +80,11 @@
 //! ## Working with Application Tags
 //!
 //! ```rust
-//! use bacnet_rs::encoding::{ApplicationTag, get_application_tag};
+//! use bacnet_rs::encoding::{ApplicationTag, decode_application_tag};
 //!
 //! let data = vec![0x21, 0x2A]; // Unsigned integer
-//! let tag = get_application_tag(&data).unwrap();
-//! assert_eq!(tag, ApplicationTag::UnsignedInteger);
+//! let (tag, _, _) = decode_application_tag(&data).unwrap();
+//! assert_eq!(tag, ApplicationTag::UnsignedInt);
 //! ```
 //!
 //! ## Context-Specific Encoding
@@ -92,10 +92,8 @@
 //! ```rust
 //! use bacnet_rs::encoding::{encode_context_unsigned, decode_context_unsigned};
 //!
-//! let mut buffer = Vec::new();
-//!
 //! // Encode with context tag 3
-//! encode_context_unsigned(&mut buffer, 3, 1000).unwrap();
+//! let buffer = encode_context_unsigned(1000, 3).unwrap();
 //!
 //! // Decode with expected context tag 3
 //! let (value, consumed) = decode_context_unsigned(&buffer, 3).unwrap();
@@ -112,12 +110,12 @@
 //! - **Length Error**: Incorrect length fields
 //!
 //! ```rust
-//! use bacnet_rs::encoding::{EncodingError, decode_application_unsigned};
+//! use bacnet_rs::encoding::{EncodingError, decode_unsigned};
 //!
 //! let invalid_data = vec![0x21]; // Missing value byte
-//! match decode_application_unsigned(&invalid_data) {
+//! match decode_unsigned(&invalid_data) {
 //!     Ok((value, _)) => println!("Value: {}", value),
-//!     Err(EncodingError::InsufficientData) => println!("Not enough data"),
+//!     Err(EncodingError::UnexpectedEndOfData) => println!("Not enough data"),
 //!     Err(e) => println!("Other error: {:?}", e),
 //! }
 //! ```

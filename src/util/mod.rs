@@ -81,8 +81,9 @@
 //! } // Timer automatically records duration
 //!
 //! // Get statistics
-//! let stats = monitor.get_stats("network_operation");
-//! println!("Average time: {:?}", stats.average_duration());
+//! if let Some(stats) = monitor.get_metrics("network_operation") {
+//!     println!("Average time: {:?}", stats.avg_duration_ms);
+//! }
 //! ```
 //!
 //! # Statistics Collection
@@ -95,8 +96,8 @@
 //! let mut stats = CommunicationStats::new();
 //!
 //! // Record successful operations
-//! stats.record_request_sent();
-//! stats.record_response_received(100); // 100 bytes received
+//! stats.record_sent(1);
+//! stats.record_received(100); // 100 bytes received
 //!
 //! // Record errors
 //! stats.record_timeout();
@@ -104,7 +105,6 @@
 //!
 //! // Get metrics
 //! println!("Success rate: {:.2}%", stats.success_rate() * 100.0);
-//! println!("Average response size: {} bytes", stats.average_response_size());
 //! ```
 //!
 //! # Debug Formatting
@@ -135,27 +135,27 @@
 //! Configurable retry strategies for reliable communication:
 //!
 //! ```rust
-//! use bacnet_rs::util::{RetryConfig, ExponentialBackoff};
-//! use std::time::Duration;
+//! use bacnet_rs::util::RetryConfig;
 //!
 //! let config = RetryConfig {
 //!     max_attempts: 3,
-//!     initial_delay: Duration::from_millis(100),
-//!     max_delay: Duration::from_secs(5),
-//!     backoff_factor: 2.0,
+//!     initial_delay_ms: 100,
+//!     max_delay_ms: 5000,
+//!     backoff_multiplier: 2.0,
 //! };
-//!
-//! let mut backoff = ExponentialBackoff::new(config);
 //!
 //! // Use in retry loop
 //! for attempt in 0..config.max_attempts {
 //!     match try_operation() {
 //!         Ok(result) => break,
 //!         Err(_) if attempt < config.max_attempts - 1 => {
-//!             let delay = backoff.next_delay();
+//!             let delay = config.delay_for_attempt(attempt);
 //!             std::thread::sleep(delay);
 //!         }
-//!         Err(e) => return Err(e),
+//!         Err(e) => {
+//!             eprintln!("Error: {}", e.to_string());
+//!             break;
+//!         },
 //!     }
 //! }
 //! # fn try_operation() -> Result<(), Box<dyn std::error::Error>> { Ok(()) }
@@ -177,8 +177,8 @@
 //!
 //! // Buffer contains the last 100 items
 //! assert_eq!(buffer.len(), 100);
-//! assert_eq!(buffer.get(0).unwrap(), "Event 50"); // Oldest remaining
-//! assert_eq!(buffer.get(99).unwrap(), "Event 149"); // Newest
+//! assert_eq!(buffer.items().get(0).unwrap(), "Event 50"); // Oldest remaining
+//! assert_eq!(buffer.items().get(99).unwrap(), "Event 149"); // Newest
 //! ```
 //!
 //! # No-std Compatibility
@@ -190,12 +190,14 @@
 //! extern crate alloc;
 //! use bacnet_rs::util::{crc16_mstp, encode_object_id};
 //!
-//! // CRC calculation works without std
-//! let data = b"test";
-//! let crc = crc16_mstp(data);
+//! fn main() {
+//!     // CRC calculation works without std
+//!     let data = b"test";
+//!     let crc = crc16_mstp(data);
 //!
-//! // Object ID encoding works without std
-//! let encoded = encode_object_id(0, 42).unwrap();
+//!     // Object ID encoding works without std
+//!     let encoded = encode_object_id(0, 42).unwrap();
+//! }
 //! ```
 
 // Debug formatting utilities

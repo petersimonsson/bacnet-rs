@@ -73,7 +73,7 @@
 //! // Property identifiers for common properties
 //! let present_value = PropertyIdentifier::PresentValue;
 //! let object_name = PropertyIdentifier::ObjectName;
-//! let units = PropertyIdentifier::Units;
+//! let units = PropertyIdentifier::OutputUnits;
 //!
 //! // Property values can represent different data types
 //! let temperature = PropertyValue::Real(23.5);
@@ -84,22 +84,24 @@
 //! ## Object Database Usage
 //!
 //! ```rust,no_run
-//! use bacnet_rs::object::{database::ObjectDatabase, ObjectIdentifier, ObjectType, PropertyIdentifier, PropertyValue};
+//! use bacnet_rs::object::{database::ObjectDatabase, ObjectIdentifier, ObjectType, PropertyIdentifier, PropertyValue, Device, AnalogInput};
+//!
+//! let device = Device::new(0, "test_device".to_string());
 //!
 //! // Create an object database
-//! let mut db = ObjectDatabase::new();
+//! let mut db = ObjectDatabase::new(device);
 //!
 //! // Add an object
-//! let obj_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
-//! db.add_object(obj_id).expect("Failed to add object");
+//! let object = AnalogInput::new(1, "analog_input".to_string());
+//! db.add_object(Box::new(object.clone())).expect("Failed to add object");
 //!
 //! // Set properties
-//! db.set_property(obj_id, PropertyIdentifier::ObjectName, 
+//! db.set_property(object.identifier, PropertyIdentifier::ObjectName,
 //!     PropertyValue::CharacterString("Room Temperature".to_string()))
 //!     .expect("Failed to set property");
 //!
 //! // Read properties
-//! let name = db.get_property(obj_id, PropertyIdentifier::ObjectName)
+//! let name = db.get_property(object.identifier, PropertyIdentifier::ObjectName)
 //!     .expect("Property not found");
 //! ```
 //!
