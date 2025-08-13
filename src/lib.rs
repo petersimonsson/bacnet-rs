@@ -1,7 +1,7 @@
 //! # BACnet-RS: A Complete BACnet Protocol Stack Implementation in Rust
 //!
-//! BACnet-RS is a comprehensive implementation of the BACnet (Building Automation and Control Networks) 
-//! protocol stack written in Rust. It provides a complete, standards-compliant BACnet implementation 
+//! BACnet-RS is a comprehensive implementation of the BACnet (Building Automation and Control Networks)
+//! protocol stack written in Rust. It provides a complete, standards-compliant BACnet implementation
 //! suitable for both embedded systems and full-featured applications.
 //!
 //! ## Features
@@ -19,7 +19,7 @@
 //!
 //! ```rust,no_run
 //! use bacnet_rs::{client::BacnetClient, object::ObjectIdentifier, ObjectType};
-//! 
+//!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create a BACnet client
 //! let mut client = BacnetClient::new("0.0.0.0:47808").await?;
@@ -27,7 +27,7 @@
 //! // Discover devices on the network
 //! let devices = client.who_is_scan(std::time::Duration::from_secs(5)).await?;
 //! println!("Found {} devices", devices.len());
-//! 
+//!
 //! // Read a property from a device
 //! if let Some(device) = devices.first() {
 //!     let object_id = ObjectIdentifier::new(ObjectType::Device, device.instance);
@@ -136,7 +136,7 @@ pub use datalink::{DataLink, DataLinkAddress, DataLinkType};
 pub use encoding::{ApplicationTag, EncodingError};
 pub use object::{BacnetObject, ObjectType, PropertyIdentifier};
 pub use service::{ConfirmedServiceChoice, ServiceError, UnconfirmedServiceChoice};
-pub use vendor::{VendorInfo, get_vendor_name, get_vendor_info, format_vendor_display};
+pub use vendor::{format_vendor_display, get_vendor_info, get_vendor_name, VendorInfo};
 
 #[cfg(feature = "std")]
 extern crate std;
