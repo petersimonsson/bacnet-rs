@@ -85,58 +85,67 @@
 //! ## Reading a Property
 //!
 //! ```rust
-//! use bacnet_rs::service::{ConfirmedServiceChoice, ReadPropertyService};
+//! use bacnet_rs::service::{ConfirmedServiceChoice, ReadPropertyRequest};
 //! use bacnet_rs::object::{ObjectIdentifier, ObjectType, PropertyIdentifier};
 //!
 //! // Create a read property request
 //! let object_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
-//! let request = ReadPropertyService {
+//! let request = ReadPropertyRequest {
 //!     object_identifier: object_id,
-//!     property_identifier: PropertyIdentifier::PresentValue,
+//!     property_identifier: PropertyIdentifier::PresentValue as u32,
 //!     property_array_index: None,
 //! };
 //!
 //! // This would be sent as a confirmed service
-//! let service = ConfirmedServiceChoice::ReadProperty(request);
+//! let service = ConfirmedServiceChoice::ReadProperty;
 //! ```
 //!
 //! ## Device Discovery
 //!
 //! ```rust
-//! use bacnet_rs::service::{UnconfirmedServiceChoice, WhoIsService};
+//! use bacnet_rs::service::{UnconfirmedServiceChoice, WhoIsRequest};
 //!
 //! // Create a Who-Is request to discover all devices
-//! let who_is = WhoIsService {
+//! let who_is = WhoIsRequest {
 //!     device_instance_range_low_limit: None,
 //!     device_instance_range_high_limit: None,
 //! };
 //!
 //! // This would be sent as an unconfirmed service
-//! let service = UnconfirmedServiceChoice::WhoIs(who_is);
+//! let service = UnconfirmedServiceChoice::WhoIs;
 //! ```
 //!
 //! ## Reading Multiple Properties
 //!
 //! ```rust
-//! use bacnet_rs::service::{ConfirmedServiceChoice, ReadPropertyMultipleService, ReadAccessSpecification};
+//! use bacnet_rs::service::{ConfirmedServiceChoice, ReadPropertyMultipleRequest, ReadAccessSpecification, PropertyReference};
 //! use bacnet_rs::object::{ObjectIdentifier, ObjectType, PropertyIdentifier};
 //!
 //! // Create a read property multiple request
 //! let object_id = ObjectIdentifier::new(ObjectType::Device, 12345);
 //! let spec = ReadAccessSpecification {
 //!     object_identifier: object_id,
-//!     list_of_property_references: vec![
-//!         PropertyIdentifier::ObjectName,
-//!         PropertyIdentifier::ModelName,
-//!         PropertyIdentifier::VendorName,
+//!     property_references: vec![
+//!         PropertyReference {
+//!             property_identifier: PropertyIdentifier::ObjectName as u32,
+//!             property_array_index: None
+//!         },
+//!         PropertyReference {
+//!             property_identifier: PropertyIdentifier::ModelName as u32,
+//!             property_array_index: None
+//!         },
+//!         PropertyReference {
+//!             property_identifier: PropertyIdentifier::VendorName as u32,
+//!             property_array_index: None
+//!         },
 //!     ],
 //! };
 //!
-//! let request = ReadPropertyMultipleService {
-//!     list_of_read_access_specs: vec![spec],
+//! let request = ReadPropertyMultipleRequest {
+//!     read_access_specifications: vec![spec],
 //! };
 //!
-//! let service = ConfirmedServiceChoice::ReadPropertyMultiple(request);
+//! let service = ConfirmedServiceChoice::ReadPropertyMultiple;
 //! ```
 //!
 //! # Error Handling
@@ -144,19 +153,18 @@
 //! Services can fail for various reasons, and BACnet defines standardized error responses:
 //!
 //! ```rust
-//! use bacnet_rs::service::{ServiceError, ErrorClass, ErrorCode};
+//! use bacnet_rs::service::ServiceError;
 //!
 //! // Example error handling
-//! let error = ServiceError {
-//!     error_class: ErrorClass::Object,
-//!     error_code: ErrorCode::UnknownObject,
-//! };
+//! let error = ServiceError::UnsupportedService;
 //!
-//! match error.error_class {
-//!     ErrorClass::Object => println!("Object-related error: {:?}", error.error_code),
-//!     ErrorClass::Property => println!("Property-related error: {:?}", error.error_code),
-//!     ErrorClass::Device => println!("Device-related error: {:?}", error.error_code),
-//!     _ => println!("Other error: {:?}", error),
+//! match error {
+//!     ServiceError::UnsupportedService => println!("UnsupportedService"),
+//!     ServiceError::InvalidParameters(p) => println!("InvalidParameters: {p}"),
+//!     ServiceError::Timeout => println!("Timeout"),
+//!     ServiceError::Rejected(r) => println!("Rejected: {r:?}"),
+//!     ServiceError::Aborted(r) => println!("Aborted: {r:?}"),
+//!     ServiceError::EncodingError(s) => println!("EncodingError: {s}"),
 //! }
 //! ```
 //!
@@ -183,7 +191,7 @@ use std::fmt;
 use core::fmt;
 
 #[cfg(not(feature = "std"))]
-use alloc::{string::String, vec::Vec, format};
+use alloc::{format, string::String, vec::Vec};
 
 /// Result type for service operations
 #[cfg(feature = "std")]
@@ -306,10 +314,10 @@ pub enum AbortReason {
 }
 
 use crate::encoding::{
-    encode_unsigned, decode_unsigned, encode_context_unsigned, decode_context_unsigned,
-    encode_context_enumerated, decode_context_enumerated, encode_context_object_id, decode_context_object_id,
-    encode_object_identifier, decode_object_identifier, encode_enumerated, decode_enumerated,
-    Result as EncodingResult
+    decode_context_enumerated, decode_context_object_id, decode_context_unsigned,
+    decode_enumerated, decode_object_identifier, decode_unsigned, encode_context_enumerated,
+    encode_context_object_id, encode_context_unsigned, encode_enumerated, encode_object_identifier,
+    encode_unsigned, Result as EncodingResult,
 };
 use crate::object::{ObjectIdentifier, PropertyValue};
 
@@ -354,17 +362,20 @@ impl WhoIsRequest {
     pub fn encode(&self, buffer: &mut Vec<u8>) -> EncodingResult<()> {
         // Both low and high limits must be present together, or both absent
         // This matches bacnet-stack behavior
-        if let (Some(low), Some(high)) = (self.device_instance_range_low_limit, self.device_instance_range_high_limit) {
+        if let (Some(low), Some(high)) = (
+            self.device_instance_range_low_limit,
+            self.device_instance_range_high_limit,
+        ) {
             // Context tag 0 - low limit
             let low_bytes = encode_context_unsigned(low, 0)?;
             buffer.extend_from_slice(&low_bytes);
-            
+
             // Context tag 1 - high limit
             let high_bytes = encode_context_unsigned(high, 1)?;
             buffer.extend_from_slice(&high_bytes);
         }
         // If only one limit is present, encode nothing (broadcast to all)
-        
+
         Ok(())
     }
 
@@ -379,7 +390,7 @@ impl WhoIsRequest {
                 Ok((low, consumed)) => {
                     request.device_instance_range_low_limit = Some(low);
                     pos += consumed;
-                    
+
                     // If we have low limit, we must have high limit
                     if pos < data.len() {
                         match decode_context_unsigned(&data[pos..], 1) {
@@ -389,7 +400,7 @@ impl WhoIsRequest {
                             Err(_) => {
                                 // Invalid format - low without high
                                 return Err(crate::encoding::EncodingError::InvalidFormat(
-                                    "Who-Is request has low limit without high limit".to_string()
+                                    "Who-Is request has low limit without high limit".to_string(),
                                 ));
                             }
                         }
@@ -406,7 +417,10 @@ impl WhoIsRequest {
 
     /// Check if this request matches a device instance
     pub fn matches(&self, device_instance: u32) -> bool {
-        match (self.device_instance_range_low_limit, self.device_instance_range_high_limit) {
+        match (
+            self.device_instance_range_low_limit,
+            self.device_instance_range_high_limit,
+        ) {
             (None, None) => true, // Matches all devices
             (Some(low), Some(high)) => device_instance >= low && device_instance <= high,
             (Some(low), None) => device_instance >= low,
@@ -456,7 +470,7 @@ impl IAmRequest {
         encode_object_identifier(
             buffer,
             self.device_identifier.object_type as u16,
-            self.device_identifier.instance
+            self.device_identifier.instance,
         )?;
 
         // Maximum APDU length accepted - application tag
@@ -478,7 +492,8 @@ impl IAmRequest {
         // Decode device identifier - application tag
         let ((object_type, instance), consumed) = decode_object_identifier(&data[pos..])?;
         let device_identifier = ObjectIdentifier {
-            object_type: crate::object::ObjectType::try_from(object_type).unwrap_or(crate::object::ObjectType::Device),
+            object_type: crate::object::ObjectType::try_from(object_type)
+                .unwrap_or(crate::object::ObjectType::Device),
             instance,
         };
         pos += consumed;
@@ -543,7 +558,7 @@ impl ReadPropertyRequest {
         let obj_id_bytes = encode_context_object_id(
             self.object_identifier.object_type as u16,
             self.object_identifier.instance,
-            0
+            0,
         )?;
         buffer.extend_from_slice(&obj_id_bytes);
 
@@ -596,7 +611,8 @@ impl ReadPropertyResponse {
         // Decode object identifier - context tag 0
         let ((object_type, instance), consumed) = decode_context_object_id(&data[pos..], 0)?;
         let object_identifier = ObjectIdentifier {
-            object_type: crate::object::ObjectType::try_from(object_type).unwrap_or(crate::object::ObjectType::Device),
+            object_type: crate::object::ObjectType::try_from(object_type)
+                .unwrap_or(crate::object::ObjectType::Device),
             instance,
         };
         pos += consumed;
@@ -718,7 +734,10 @@ impl WritePropertyRequest {
         let object_id = crate::util::encode_object_id(
             self.object_identifier.object_type as u16,
             self.object_identifier.instance,
-        ).ok_or(crate::encoding::EncodingError::InvalidFormat("Invalid object identifier".to_string()))?;
+        )
+        .ok_or(crate::encoding::EncodingError::InvalidFormat(
+            "Invalid object identifier".to_string(),
+        ))?;
         buffer.push(0x0C); // Context tag 0, length 4
         buffer.extend_from_slice(&object_id.to_be_bytes());
 
@@ -760,7 +779,8 @@ impl WritePropertyRequest {
         let object_id = u32::from_be_bytes(object_id_bytes);
         let (object_type, instance) = crate::util::decode_object_id(object_id);
         let object_identifier = ObjectIdentifier {
-            object_type: crate::object::ObjectType::try_from(object_type).unwrap_or(crate::object::ObjectType::Device),
+            object_type: crate::object::ObjectType::try_from(object_type)
+                .unwrap_or(crate::object::ObjectType::Device),
             instance,
         };
         pos += 4;
@@ -867,7 +887,10 @@ impl ReadPropertyMultipleRequest {
 
 impl ReadAccessSpecification {
     /// Create a new read access specification
-    pub fn new(object_identifier: ObjectIdentifier, property_references: Vec<PropertyReference>) -> Self {
+    pub fn new(
+        object_identifier: ObjectIdentifier,
+        property_references: Vec<PropertyReference>,
+    ) -> Self {
         Self {
             object_identifier,
             property_references,
@@ -963,7 +986,10 @@ impl SubscribeCovRequest {
         let object_id = crate::util::encode_object_id(
             self.monitored_object_identifier.object_type as u16,
             self.monitored_object_identifier.instance,
-        ).ok_or(crate::encoding::EncodingError::InvalidFormat("Invalid object identifier".to_string()))?;
+        )
+        .ok_or(crate::encoding::EncodingError::InvalidFormat(
+            "Invalid object identifier".to_string(),
+        ))?;
         buffer.push(0x1C); // Context tag 1, length 4
         buffer.extend_from_slice(&object_id.to_be_bytes());
 
@@ -1067,7 +1093,10 @@ impl CovNotificationRequest {
         let device_id = crate::util::encode_object_id(
             self.initiating_device_identifier.object_type as u16,
             self.initiating_device_identifier.instance,
-        ).ok_or(crate::encoding::EncodingError::InvalidFormat("Invalid device identifier".to_string()))?;
+        )
+        .ok_or(crate::encoding::EncodingError::InvalidFormat(
+            "Invalid device identifier".to_string(),
+        ))?;
         buffer.push(0x1C); // Context tag 1, length 4
         buffer.extend_from_slice(&device_id.to_be_bytes());
 
@@ -1075,7 +1104,10 @@ impl CovNotificationRequest {
         let object_id = crate::util::encode_object_id(
             self.monitored_object_identifier.object_type as u16,
             self.monitored_object_identifier.instance,
-        ).ok_or(crate::encoding::EncodingError::InvalidFormat("Invalid object identifier".to_string()))?;
+        )
+        .ok_or(crate::encoding::EncodingError::InvalidFormat(
+            "Invalid object identifier".to_string(),
+        ))?;
         buffer.push(0x2C); // Context tag 2, length 4
         buffer.extend_from_slice(&object_id.to_be_bytes());
 
@@ -1186,7 +1218,10 @@ impl CovSubscriptionManager {
     }
 
     /// Get all subscriptions for a monitored object
-    pub fn get_subscriptions_for_object(&self, object_id: ObjectIdentifier) -> Vec<&CovSubscription> {
+    pub fn get_subscriptions_for_object(
+        &self,
+        object_id: ObjectIdentifier,
+    ) -> Vec<&CovSubscription> {
         self.subscriptions
             .iter()
             .filter(|s| s.monitored_object_identifier == object_id && !s.is_expired())
@@ -1207,7 +1242,10 @@ impl CovSubscriptionManager {
 
     /// Get total number of active subscriptions
     pub fn active_count(&self) -> usize {
-        self.subscriptions.iter().filter(|s| !s.is_expired()).count()
+        self.subscriptions
+            .iter()
+            .filter(|s| !s.is_expired())
+            .count()
     }
 }
 
@@ -1247,7 +1285,11 @@ pub enum FileAccessMethod {
 
 impl AtomicReadFileRequest {
     /// Create a new Atomic Read File request with stream access
-    pub fn new_stream_access(file_identifier: ObjectIdentifier, start_position: i32, octet_count: u32) -> Self {
+    pub fn new_stream_access(
+        file_identifier: ObjectIdentifier,
+        start_position: i32,
+        octet_count: u32,
+    ) -> Self {
         Self {
             file_identifier,
             access_method: FileAccessMethod::StreamAccess {
@@ -1258,7 +1300,11 @@ impl AtomicReadFileRequest {
     }
 
     /// Create a new Atomic Read File request with record access
-    pub fn new_record_access(file_identifier: ObjectIdentifier, start_record: i32, record_count: u32) -> Self {
+    pub fn new_record_access(
+        file_identifier: ObjectIdentifier,
+        start_record: i32,
+        record_count: u32,
+    ) -> Self {
         Self {
             file_identifier,
             access_method: FileAccessMethod::RecordAccess {
@@ -1274,7 +1320,10 @@ impl AtomicReadFileRequest {
         let file_id = crate::util::encode_object_id(
             self.file_identifier.object_type as u16,
             self.file_identifier.instance,
-        ).ok_or(crate::encoding::EncodingError::InvalidFormat("Invalid file identifier".to_string()))?;
+        )
+        .ok_or(crate::encoding::EncodingError::InvalidFormat(
+            "Invalid file identifier".to_string(),
+        ))?;
         buffer.push(0x0C); // Context tag 0, length 4
         buffer.extend_from_slice(&file_id.to_be_bytes());
 
@@ -1282,32 +1331,38 @@ impl AtomicReadFileRequest {
         buffer.push(0x1E); // Context tag 1, opening tag
 
         match &self.access_method {
-            FileAccessMethod::StreamAccess { file_start_position, requested_octet_count } => {
+            FileAccessMethod::StreamAccess {
+                file_start_position,
+                requested_octet_count,
+            } => {
                 // Stream access - context tag 0 (opening tag)
                 buffer.push(0x0E); // Context tag 0, opening tag
-                
+
                 // File start position - context tag 0
                 buffer.push(0x09); // Context tag 0, length 1
                 buffer.extend_from_slice(&file_start_position.to_be_bytes());
-                
+
                 // Requested octet count - context tag 1
                 buffer.push(0x19); // Context tag 1, length 1
                 buffer.extend_from_slice(&requested_octet_count.to_be_bytes());
-                
+
                 buffer.push(0x0F); // Context tag 0, closing tag
             }
-            FileAccessMethod::RecordAccess { file_start_record, requested_record_count } => {
+            FileAccessMethod::RecordAccess {
+                file_start_record,
+                requested_record_count,
+            } => {
                 // Record access - context tag 1 (opening tag)
                 buffer.push(0x1E); // Context tag 1, opening tag
-                
+
                 // File start record - context tag 0
                 buffer.push(0x09); // Context tag 0, length 1
                 buffer.extend_from_slice(&file_start_record.to_be_bytes());
-                
+
                 // Requested record count - context tag 1
                 buffer.push(0x19); // Context tag 1, length 1
                 buffer.extend_from_slice(&requested_record_count.to_be_bytes());
-                
+
                 buffer.push(0x1F); // Context tag 1, closing tag
             }
         }
@@ -1406,7 +1461,11 @@ pub enum FileWriteAccessMethod {
 
 impl AtomicWriteFileRequest {
     /// Create a new Atomic Write File request with stream access
-    pub fn new_stream_access(file_identifier: ObjectIdentifier, start_position: i32, data: Vec<u8>) -> Self {
+    pub fn new_stream_access(
+        file_identifier: ObjectIdentifier,
+        start_position: i32,
+        data: Vec<u8>,
+    ) -> Self {
         Self {
             file_identifier,
             access_method: FileWriteAccessMethod::StreamAccess {
@@ -1417,7 +1476,11 @@ impl AtomicWriteFileRequest {
     }
 
     /// Create a new Atomic Write File request with record access
-    pub fn new_record_access(file_identifier: ObjectIdentifier, start_record: i32, records: Vec<Vec<u8>>) -> Self {
+    pub fn new_record_access(
+        file_identifier: ObjectIdentifier,
+        start_record: i32,
+        records: Vec<Vec<u8>>,
+    ) -> Self {
         let record_count = records.len() as u32;
         Self {
             file_identifier,
@@ -1435,7 +1498,10 @@ impl AtomicWriteFileRequest {
         let file_id = crate::util::encode_object_id(
             self.file_identifier.object_type as u16,
             self.file_identifier.instance,
-        ).ok_or(crate::encoding::EncodingError::InvalidFormat("Invalid file identifier".to_string()))?;
+        )
+        .ok_or(crate::encoding::EncodingError::InvalidFormat(
+            "Invalid file identifier".to_string(),
+        ))?;
         buffer.push(0x0C); // Context tag 0, length 4
         buffer.extend_from_slice(&file_id.to_be_bytes());
 
@@ -1443,34 +1509,41 @@ impl AtomicWriteFileRequest {
         buffer.push(0x1E); // Context tag 1, opening tag
 
         match &self.access_method {
-            FileWriteAccessMethod::StreamAccess { file_start_position, file_data } => {
+            FileWriteAccessMethod::StreamAccess {
+                file_start_position,
+                file_data,
+            } => {
                 // Stream access - context tag 0 (opening tag)
                 buffer.push(0x0E); // Context tag 0, opening tag
-                
+
                 // File start position - context tag 0
                 buffer.push(0x09); // Context tag 0, length 1
                 buffer.extend_from_slice(&file_start_position.to_be_bytes());
-                
+
                 // File data - context tag 1 (opening tag)
                 buffer.push(0x1E); // Context tag 1, opening tag
                 buffer.extend_from_slice(file_data);
                 buffer.push(0x1F); // Context tag 1, closing tag
-                
+
                 buffer.push(0x0F); // Context tag 0, closing tag
             }
-            FileWriteAccessMethod::RecordAccess { file_start_record, record_count: _, file_record_data } => {
+            FileWriteAccessMethod::RecordAccess {
+                file_start_record,
+                record_count: _,
+                file_record_data,
+            } => {
                 // Record access - context tag 1 (opening tag)
                 buffer.push(0x1E); // Context tag 1, opening tag
-                
+
                 // File start record - context tag 0
                 buffer.push(0x09); // Context tag 0, length 1
                 buffer.extend_from_slice(&file_start_record.to_be_bytes());
-                
+
                 // Record count - context tag 1
                 let record_count = file_record_data.len() as u32;
                 buffer.push(0x19); // Context tag 1, length 1
                 buffer.extend_from_slice(&record_count.to_be_bytes());
-                
+
                 // File record data - context tag 2 (opening tag)
                 buffer.push(0x2E); // Context tag 2, opening tag
                 for record in file_record_data {
@@ -1480,7 +1553,7 @@ impl AtomicWriteFileRequest {
                     buffer.extend_from_slice(record);
                 }
                 buffer.push(0x2F); // Context tag 2, closing tag
-                
+
                 buffer.push(0x1F); // Context tag 1, closing tag
             }
         }
@@ -1534,16 +1607,26 @@ impl BacnetDateTime {
         hundredths: u8,
     ) -> Self {
         Self {
-            date: crate::object::Date { year, month, day, weekday },
-            time: crate::object::Time { hour, minute, second, hundredths },
+            date: crate::object::Date {
+                year,
+                month,
+                day,
+                weekday,
+            },
+            time: crate::object::Time {
+                hour,
+                minute,
+                second,
+                hundredths,
+            },
         }
     }
 
     /// Create from current system time (requires std feature)
     #[cfg(feature = "std")]
     pub fn now() -> Self {
-        use chrono::{Datelike, Timelike, Local};
-        
+        use chrono::{Datelike, Local, Timelike};
+
         let now = Local::now();
         let year = now.year() as u16;
         let month = now.month() as u8;
@@ -1577,39 +1660,67 @@ impl BacnetDateTime {
 
     /// Check if this datetime is unspecified
     pub fn is_unspecified(&self) -> bool {
-        self.date.year == 255 && self.date.month == 255 && self.date.day == 255 &&
-        self.date.weekday == 255 && self.time.hour == 255 && self.time.minute == 255 &&
-        self.time.second == 255 && self.time.hundredths == 255
+        self.date.year == 255
+            && self.date.month == 255
+            && self.date.day == 255
+            && self.date.weekday == 255
+            && self.time.hour == 255
+            && self.time.minute == 255
+            && self.time.second == 255
+            && self.time.hundredths == 255
     }
 
     /// Encode BACnet DateTime
     pub fn encode(&self, buffer: &mut Vec<u8>) -> EncodingResult<()> {
         use crate::encoding::{encode_date, encode_time};
-        
+
         // Encode date
-        encode_date(buffer, self.date.year, self.date.month, self.date.day, self.date.weekday)?;
-        
+        encode_date(
+            buffer,
+            self.date.year,
+            self.date.month,
+            self.date.day,
+            self.date.weekday,
+        )?;
+
         // Encode time
-        encode_time(buffer, self.time.hour, self.time.minute, self.time.second, self.time.hundredths)?;
-        
+        encode_time(
+            buffer,
+            self.time.hour,
+            self.time.minute,
+            self.time.second,
+            self.time.hundredths,
+        )?;
+
         Ok(())
     }
 
     /// Decode BACnet DateTime
     pub fn decode(data: &[u8]) -> EncodingResult<(Self, usize)> {
         use crate::encoding::{decode_date, decode_time};
-        
+
         // Decode date (4 bytes)
         let ((year, month, day, weekday), consumed_date) = decode_date(data)?;
-        
+
         // Decode time (4 bytes)
-        let ((hour, minute, second, hundredths), consumed_time) = decode_time(&data[consumed_date..])?;
-        
+        let ((hour, minute, second, hundredths), consumed_time) =
+            decode_time(&data[consumed_date..])?;
+
         let datetime = BacnetDateTime {
-            date: crate::object::Date { year, month, day, weekday },
-            time: crate::object::Time { hour, minute, second, hundredths },
+            date: crate::object::Date {
+                year,
+                month,
+                day,
+                weekday,
+            },
+            time: crate::object::Time {
+                hour,
+                minute,
+                second,
+                hundredths,
+            },
         };
-        
+
         Ok((datetime, consumed_date + consumed_time))
     }
 }
@@ -1648,7 +1759,7 @@ impl UtcTimeSynchronizationRequest {
     #[cfg(feature = "std")]
     pub fn now() -> Self {
         use chrono::{Datelike, Timelike, Utc};
-        
+
         let now = Utc::now();
         let year = now.year() as u16;
         let month = now.month() as u8;
@@ -1659,7 +1770,8 @@ impl UtcTimeSynchronizationRequest {
         let second = now.second() as u8;
         let hundredths = (now.nanosecond() / 10_000_000) as u8;
 
-        let utc_date_time = BacnetDateTime::new(year, month, day, weekday, hour, minute, second, hundredths);
+        let utc_date_time =
+            BacnetDateTime::new(year, month, day, weekday, hour, minute, second, hundredths);
         Self::new(utc_date_time)
     }
 
@@ -1678,7 +1790,7 @@ impl UtcTimeSynchronizationRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::object::{ObjectType, ObjectIdentifier};
+    use crate::object::{ObjectIdentifier, ObjectType};
 
     #[test]
     fn test_whois_request() {
@@ -1702,7 +1814,7 @@ mod tests {
     #[test]
     fn test_whois_encoding() {
         let mut buffer = Vec::new();
-        
+
         // Test encoding Who-Is for all devices
         let whois_all = WhoIsRequest::new();
         whois_all.encode(&mut buffer).unwrap();
@@ -1723,7 +1835,7 @@ mod tests {
     fn test_iam_request() {
         let device_id = ObjectIdentifier::new(ObjectType::Device, 123);
         let iam = IAmRequest::new(device_id, 1476, 0, 999);
-        
+
         assert_eq!(iam.device_identifier.instance, 123);
         assert_eq!(iam.max_apdu_length_accepted, 1476);
         assert_eq!(iam.vendor_identifier, 999);
@@ -1733,7 +1845,7 @@ mod tests {
     fn test_read_property_request() {
         let object_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
         let read_prop = ReadPropertyRequest::new(object_id, 85); // Present Value
-        
+
         assert_eq!(read_prop.object_identifier.instance, 1);
         assert_eq!(read_prop.property_identifier, 85);
         assert_eq!(read_prop.property_array_index, None);
@@ -1747,14 +1859,15 @@ mod tests {
         let object_id = ObjectIdentifier::new(ObjectType::AnalogOutput, 1);
         let property_value = vec![0x44, 0x42, 0x20, 0x00, 0x00]; // Real 40.0
         let write_prop = WritePropertyRequest::new(object_id, 85, property_value.clone());
-        
+
         assert_eq!(write_prop.object_identifier.instance, 1);
         assert_eq!(write_prop.property_identifier, 85);
         assert_eq!(write_prop.property_value, property_value);
         assert_eq!(write_prop.priority, None);
 
         // Test with priority
-        let write_prop_priority = WritePropertyRequest::with_priority(object_id, 85, property_value.clone(), 8);
+        let write_prop_priority =
+            WritePropertyRequest::with_priority(object_id, 85, property_value.clone(), 8);
         assert_eq!(write_prop_priority.priority, Some(8));
 
         // Test encoding/decoding
@@ -1781,18 +1894,31 @@ mod tests {
         let spec2 = ReadAccessSpecification::new(object_id2, vec![prop_ref3]);
 
         let rpm_request = ReadPropertyMultipleRequest::new(vec![spec1, spec2]);
-        
+
         assert_eq!(rpm_request.read_access_specifications.len(), 2);
-        assert_eq!(rpm_request.read_access_specifications[0].property_references.len(), 2);
-        assert_eq!(rpm_request.read_access_specifications[1].property_references.len(), 1);
-        assert_eq!(rpm_request.read_access_specifications[1].property_references[0].property_array_index, Some(8));
+        assert_eq!(
+            rpm_request.read_access_specifications[0]
+                .property_references
+                .len(),
+            2
+        );
+        assert_eq!(
+            rpm_request.read_access_specifications[1]
+                .property_references
+                .len(),
+            1
+        );
+        assert_eq!(
+            rpm_request.read_access_specifications[1].property_references[0].property_array_index,
+            Some(8)
+        );
     }
 
     #[test]
     fn test_subscribe_cov_request() {
         let object_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
         let cov_req = SubscribeCovRequest::new(123, object_id);
-        
+
         assert_eq!(cov_req.subscriber_process_identifier, 123);
         assert_eq!(cov_req.monitored_object_identifier.instance, 1);
         assert_eq!(cov_req.issue_confirmed_notifications, None);
@@ -1815,28 +1941,28 @@ mod tests {
     #[test]
     fn test_cov_subscription_manager() {
         let mut manager = CovSubscriptionManager::new();
-        
+
         let device_id = ObjectIdentifier::new(ObjectType::Device, 1);
         let object_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
-        
+
         let subscription = CovSubscription::new(123, device_id, object_id, 3600);
         manager.add_subscription(subscription);
-        
+
         assert_eq!(manager.active_count(), 1);
-        
+
         let subscriptions = manager.get_subscriptions_for_object(object_id);
         assert_eq!(subscriptions.len(), 1);
         assert_eq!(subscriptions[0].subscriber_process_identifier, 123);
-        
+
         // Test time updates
         manager.update_timers(1800); // 30 minutes
         let subscriptions = manager.get_subscriptions_for_object(object_id);
         assert_eq!(subscriptions[0].time_remaining, 1800);
-        
+
         // Test expiration
         manager.update_timers(1800); // Another 30 minutes
         assert_eq!(manager.active_count(), 0);
-        
+
         manager.cleanup_expired();
         assert_eq!(manager.subscriptions.len(), 0);
     }
@@ -1849,15 +1975,15 @@ mod tests {
             crate::object::PropertyValue::Real(25.5), // Present Value
             crate::object::PropertyValue::Boolean(false), // Status Flags
         ];
-        
+
         let notification = CovNotificationRequest::new(123, device_id, object_id, 3600, values);
-        
+
         assert_eq!(notification.subscriber_process_identifier, 123);
         assert_eq!(notification.initiating_device_identifier, device_id);
         assert_eq!(notification.monitored_object_identifier, object_id);
         assert_eq!(notification.time_remaining, 3600);
         assert_eq!(notification.list_of_values.len(), 2);
-        
+
         // Test encoding
         let mut buffer = Vec::new();
         notification.encode(&mut buffer).unwrap();
@@ -1867,11 +1993,14 @@ mod tests {
     #[test]
     fn test_atomic_read_file_request() {
         let file_id = ObjectIdentifier::new(ObjectType::File, 1);
-        
+
         // Test stream access
         let read_stream = AtomicReadFileRequest::new_stream_access(file_id, 0, 1024);
         match &read_stream.access_method {
-            FileAccessMethod::StreamAccess { file_start_position, requested_octet_count } => {
+            FileAccessMethod::StreamAccess {
+                file_start_position,
+                requested_octet_count,
+            } => {
                 assert_eq!(*file_start_position, 0);
                 assert_eq!(*requested_octet_count, 1024);
             }
@@ -1881,7 +2010,10 @@ mod tests {
         // Test record access
         let read_record = AtomicReadFileRequest::new_record_access(file_id, 5, 10);
         match &read_record.access_method {
-            FileAccessMethod::RecordAccess { file_start_record, requested_record_count } => {
+            FileAccessMethod::RecordAccess {
+                file_start_record,
+                requested_record_count,
+            } => {
                 assert_eq!(*file_start_record, 5);
                 assert_eq!(*requested_record_count, 10);
             }
@@ -1900,9 +2032,12 @@ mod tests {
         let data = vec![1, 2, 3, 4, 5];
         let response_stream = AtomicReadFileResponse::new_stream_access(false, 0, data.clone());
         assert_eq!(response_stream.end_of_file, false);
-        
+
         match &response_stream.access_method_result {
-            FileAccessMethodResult::StreamAccess { file_start_position, file_data } => {
+            FileAccessMethodResult::StreamAccess {
+                file_start_position,
+                file_data,
+            } => {
                 assert_eq!(*file_start_position, 0);
                 assert_eq!(*file_data, data);
             }
@@ -1913,9 +2048,13 @@ mod tests {
         let records = vec![vec![1, 2], vec![3, 4], vec![5, 6]];
         let response_record = AtomicReadFileResponse::new_record_access(true, 10, records.clone());
         assert_eq!(response_record.end_of_file, true);
-        
+
         match &response_record.access_method_result {
-            FileAccessMethodResult::RecordAccess { file_start_record, record_count, file_record_data } => {
+            FileAccessMethodResult::RecordAccess {
+                file_start_record,
+                record_count,
+                file_record_data,
+            } => {
                 assert_eq!(*file_start_record, 10);
                 assert_eq!(*record_count, 3);
                 assert_eq!(*file_record_data, records);
@@ -1927,12 +2066,15 @@ mod tests {
     #[test]
     fn test_atomic_write_file_request() {
         let file_id = ObjectIdentifier::new(ObjectType::File, 1);
-        
+
         // Test stream access
         let data = vec![65, 66, 67, 68]; // "ABCD"
         let write_stream = AtomicWriteFileRequest::new_stream_access(file_id, 100, data.clone());
         match &write_stream.access_method {
-            FileWriteAccessMethod::StreamAccess { file_start_position, file_data } => {
+            FileWriteAccessMethod::StreamAccess {
+                file_start_position,
+                file_data,
+            } => {
                 assert_eq!(*file_start_position, 100);
                 assert_eq!(*file_data, data);
             }
@@ -1947,7 +2089,11 @@ mod tests {
         ];
         let write_record = AtomicWriteFileRequest::new_record_access(file_id, 5, records.clone());
         match &write_record.access_method {
-            FileWriteAccessMethod::RecordAccess { file_start_record, record_count, file_record_data } => {
+            FileWriteAccessMethod::RecordAccess {
+                file_start_record,
+                record_count,
+                file_record_data,
+            } => {
                 assert_eq!(*file_start_record, 5);
                 assert_eq!(*record_count, 3);
                 assert_eq!(*file_record_data, records);
@@ -2002,7 +2148,7 @@ mod tests {
     fn test_time_synchronization_request() {
         let datetime = BacnetDateTime::new(2024, 6, 20, 4, 10, 15, 30, 25);
         let time_sync = TimeSynchronizationRequest::new(datetime);
-        
+
         assert_eq!(time_sync.date_time, datetime);
 
         // Test encoding/decoding
@@ -2018,7 +2164,7 @@ mod tests {
     fn test_utc_time_synchronization_request() {
         let utc_datetime = BacnetDateTime::new(2024, 6, 20, 4, 18, 45, 15, 75);
         let utc_sync = UtcTimeSynchronizationRequest::new(utc_datetime);
-        
+
         assert_eq!(utc_sync.utc_date_time, utc_datetime);
 
         // Test encoding/decoding
@@ -2036,10 +2182,10 @@ mod tests {
         // Test creating time sync with current time
         let now_sync = TimeSynchronizationRequest::now();
         assert!(!now_sync.date_time.is_unspecified());
-        
+
         let utc_now_sync = UtcTimeSynchronizationRequest::now();
         assert!(!utc_now_sync.utc_date_time.is_unspecified());
-        
+
         // The current time should be reasonable
         assert!(now_sync.date_time.date.year >= 2024);
         assert!(now_sync.date_time.date.month >= 1 && now_sync.date_time.date.month <= 12);
