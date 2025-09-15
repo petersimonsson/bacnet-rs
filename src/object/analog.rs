@@ -626,4 +626,3 @@ mod tests {
         assert_eq!(ai.status_flags, 0x0A); // 1010 in binary
     }
 }
-

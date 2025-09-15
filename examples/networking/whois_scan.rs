@@ -246,4 +246,3 @@ fn process_response(data: &[u8], source: SocketAddr) -> Option<DiscoveredDevice>
         _ => None,
     }
 }
-

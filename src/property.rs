@@ -945,4 +945,3 @@ mod tests {
         assert_eq!(get_unit_id("nonexistent-unit"), None);
     }
 }
-

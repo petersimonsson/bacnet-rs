@@ -722,4 +722,3 @@ mod tests {
             .any(|p| matches!(p, Pattern::AsciiText { .. })));
     }
 }
-

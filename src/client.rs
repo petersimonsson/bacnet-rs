@@ -593,4 +593,3 @@ mod tests {
         assert_eq!(instance, 5047);
     }
 }
-

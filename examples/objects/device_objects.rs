@@ -4,16 +4,19 @@
 //! BACnet device using ReadPropertyMultiple requests.
 
 use bacnet_rs::{
-    service::{ReadPropertyMultipleRequest, ReadAccessSpecification, PropertyReference, ConfirmedServiceChoice, WhoIsRequest, IAmRequest, UnconfirmedServiceChoice},
-    object::{ObjectIdentifier, ObjectType},
+    app::{Apdu, MaxApduSize, MaxSegments},
     network::Npdu,
-    app::{Apdu, MaxSegments, MaxApduSize},
+    object::{ObjectIdentifier, ObjectType},
     property::decode_units,
+    service::{
+        ConfirmedServiceChoice, IAmRequest, PropertyReference, ReadAccessSpecification,
+        ReadPropertyMultipleRequest, UnconfirmedServiceChoice, WhoIsRequest,
+    },
 };
 use std::{
+    env,
     net::{SocketAddr, UdpSocket},
     time::{Duration, Instant},
-    env,
 };
 
 /// Structure to hold discovered device information
@@ -42,7 +45,7 @@ impl ObjectInfo {
         let object_type_name = match object_identifier.object_type {
             ObjectType::Device => "Device",
             ObjectType::AnalogInput => "Analog Input",
-            ObjectType::AnalogOutput => "Analog Output", 
+            ObjectType::AnalogOutput => "Analog Output",
             ObjectType::AnalogValue => "Analog Value",
             ObjectType::BinaryInput => "Binary Input",
             ObjectType::BinaryOutput => "Binary Output",
@@ -71,7 +74,8 @@ impl ObjectInfo {
             ObjectType::LoadControl => "Load Control",
             ObjectType::StructuredView => "Structured View",
             ObjectType::AccessDoor => "Access Door",
-        }.to_string();
+        }
+        .to_string();
 
         Self {
             object_identifier,
@@ -111,10 +115,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Step 0: Discovering all devices on network...");
     let discovered_devices = discover_all_devices(&socket, target_addr)?;
     println!("Found {} devices total", discovered_devices.len());
-    
+
     // Show discovered devices
     for (i, device) in discovered_devices.iter().enumerate() {
-        println!("  Device {}: ID {} at {}", i + 1, device.device_id, device.address);
+        println!(
+            "  Device {}: ID {} at {}",
+            i + 1,
+            device.device_id,
+            device.address
+        );
         if device.is_router {
             println!("    - Router/Gateway device");
         }
@@ -142,75 +151,81 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Network Discovery Complete");
     println!("Total devices discovered: {}", discovered_devices.len());
     println!("Total objects across all devices: {}", total_objects);
-    
+
     // Note: RS485 devices discovered through routing
-    
+
     Ok(())
 }
 
 /// Discover all devices on the network including those behind routers
-fn discover_all_devices(socket: &UdpSocket, target_addr: SocketAddr) -> Result<Vec<DiscoveredDevice>, Box<dyn std::error::Error>> {
+fn discover_all_devices(
+    socket: &UdpSocket,
+    target_addr: SocketAddr,
+) -> Result<Vec<DiscoveredDevice>, Box<dyn std::error::Error>> {
     let mut discovered_devices = Vec::new();
-    
+
     // Send Who-Is broadcast to discover all devices
     let whois = WhoIsRequest::new();
     let mut buffer = Vec::new();
     whois.encode(&mut buffer)?;
-    
+
     // Create NPDU for broadcast
     let mut npdu = Npdu::new();
     npdu.control.expecting_reply = false;
     npdu.control.priority = 0;
     let npdu_buffer = npdu.encode();
-    
+
     // Create unconfirmed service request APDU
     let mut apdu = vec![0x10]; // Unconfirmed-Request PDU type
     apdu.push(UnconfirmedServiceChoice::WhoIs as u8);
     apdu.extend_from_slice(&buffer);
-    
+
     // Combine NPDU and APDU
     let mut message = npdu_buffer;
     message.extend_from_slice(&apdu);
-    
+
     // Wrap in BVLC header for BACnet/IP (broadcast)
     let mut bvlc_message = vec![
         0x81, // BVLC Type
-        0x0B, // Original-Broadcast-NPDU  
+        0x0B, // Original-Broadcast-NPDU
         0x00, 0x00, // Length placeholder
     ];
     bvlc_message.extend_from_slice(&message);
-    
+
     // Update BVLC length
     let total_len = bvlc_message.len() as u16;
     bvlc_message[2] = (total_len >> 8) as u8;
     bvlc_message[3] = (total_len & 0xFF) as u8;
-    
+
     // Send Who-Is broadcast to local network
     let broadcast_addr = get_broadcast_address(target_addr);
     println!("Sending Who-Is broadcast to {}", broadcast_addr);
     socket.send_to(&bvlc_message, broadcast_addr)?;
-    
+
     // Also send unicast to the specific target (in case it's behind a router)
     let mut unicast_message = bvlc_message.clone();
     unicast_message[1] = 0x0A; // Original-Unicast-NPDU
     println!("Sending Who-Is unicast to {}", target_addr);
     socket.send_to(&unicast_message, target_addr)?;
-    
+
     // Collect I-Am responses
     let mut recv_buffer = [0u8; 1500];
     let start_time = Instant::now();
     let mut seen_devices = std::collections::HashSet::new();
-    
+
     println!("Waiting for I-Am responses...");
-    
+
     while start_time.elapsed() < Duration::from_secs(5) {
         match socket.recv_from(&mut recv_buffer) {
             Ok((len, source)) => {
-                if let Some(device) = process_iam_response_with_routing(&recv_buffer[..len], source) {
+                if let Some(device) = process_iam_response_with_routing(&recv_buffer[..len], source)
+                {
                     // Avoid duplicates
                     if !seen_devices.contains(&device.device_id) {
-                        println!("  Discovered device {} at {} (Router: {})", 
-                                device.device_id, device.address, device.is_router);
+                        println!(
+                            "  Discovered device {} at {} (Router: {})",
+                            device.device_id, device.address, device.is_router
+                        );
                         seen_devices.insert(device.device_id);
                         discovered_devices.push(device);
                     }
@@ -224,20 +239,28 @@ fn discover_all_devices(socket: &UdpSocket, target_addr: SocketAddr) -> Result<V
             }
         }
     }
-    
+
     // If we found routers, try to discover devices behind them
-    let routers: Vec<_> = discovered_devices.iter()
+    let routers: Vec<_> = discovered_devices
+        .iter()
         .filter(|d| d.is_router)
         .cloned()
         .collect();
-        
+
     if !routers.is_empty() {
-        println!("Found {} routers, discovering devices behind them...", routers.len());
-        
+        println!(
+            "Found {} routers, discovering devices behind them...",
+            routers.len()
+        );
+
         for router in &routers {
             match discover_devices_behind_router(socket, router) {
                 Ok(mut routed_devices) => {
-                    println!("  Found {} devices behind router {}", routed_devices.len(), router.device_id);
+                    println!(
+                        "  Found {} devices behind router {}",
+                        routed_devices.len(),
+                        router.device_id
+                    );
                     for device in &routed_devices {
                         if !seen_devices.contains(&device.device_id) {
                             seen_devices.insert(device.device_id);
@@ -247,16 +270,19 @@ fn discover_all_devices(socket: &UdpSocket, target_addr: SocketAddr) -> Result<V
                     }
                 }
                 Err(e) => {
-                    println!("  Warning: Failed to discover devices behind router {}: {}", router.device_id, e);
+                    println!(
+                        "  Warning: Failed to discover devices behind router {}: {}",
+                        router.device_id, e
+                    );
                 }
             }
         }
     }
-    
+
     if discovered_devices.is_empty() {
         // Fallback: add the router first and then discover devices behind it
         println!("No I-Am responses received, starting enhanced router discovery");
-        
+
         // Add the IP-RS485 converter first
         let router = DiscoveredDevice {
             device_id: 5046,
@@ -265,16 +291,19 @@ fn discover_all_devices(socket: &UdpSocket, target_addr: SocketAddr) -> Result<V
             vendor_id: Some(0),
             max_apdu_length: Some(1476),
         };
-        
+
         discovered_devices.push(router.clone());
         println!("Added router device: 5046 (IP-RS485 Converter)");
-        
+
         // Now discover devices behind the router using enhanced logic
         match discover_devices_behind_router(socket, &router) {
             Ok(downstream_devices) => {
                 let count = downstream_devices.len();
                 discovered_devices.extend(downstream_devices);
-                println!("Found {} devices behind router using enhanced discovery", count);
+                println!(
+                    "Found {} devices behind router using enhanced discovery",
+                    count
+                );
             }
             Err(e) => {
                 println!("Enhanced discovery failed: {}, using fallback", e);
@@ -286,7 +315,7 @@ fn discover_all_devices(socket: &UdpSocket, target_addr: SocketAddr) -> Result<V
                     vendor_id: Some(0),
                     max_apdu_length: Some(1476),
                 });
-                
+
                 discovered_devices.push(DiscoveredDevice {
                     device_id: 1,
                     address: target_addr,
@@ -297,7 +326,7 @@ fn discover_all_devices(socket: &UdpSocket, target_addr: SocketAddr) -> Result<V
             }
         }
     }
-    
+
     Ok(discovered_devices)
 }
 
@@ -334,7 +363,7 @@ fn process_iam_response_with_routing(data: &[u8], source: SocketAddr) -> Option<
 
     // Decode NPDU to check for routing information
     let (npdu, npdu_len) = Npdu::decode(&data[npdu_start..]).ok()?;
-    
+
     // Check if this message was routed (has source network/address)
     let is_routed = npdu.destination.is_some() || npdu.source.is_some();
 
@@ -365,10 +394,10 @@ fn process_iam_response_with_routing(data: &[u8], source: SocketAddr) -> Option<
         Ok(iam) => {
             // Detect if this device is likely a router by checking device ID ranges
             // Device ID 5046 mentioned by user is likely a router/converter
-            let is_router = iam.device_identifier.instance == 5046 
-                || is_routed 
+            let is_router = iam.device_identifier.instance == 5046
+                || is_routed
                 || is_likely_router_device_id(iam.device_identifier.instance);
-                
+
             Some(DiscoveredDevice {
                 device_id: iam.device_identifier.instance,
                 address: source,
@@ -400,49 +429,61 @@ fn is_likely_router_device_id(device_id: u32) -> bool {
 fn has_router_device_naming_pattern(device_id: u32) -> bool {
     // Common patterns in device IDs that indicate routers/gateways
     let id_str = device_id.to_string();
-    
+
     // Look for patterns like 5046, 5047, etc. (consecutive gateway/device pairs)
     if device_id >= 5040 && device_id <= 5050 {
         return true;
     }
-    
+
     // Niagara JACE controllers often have specific ranges
     if device_id >= 4000 && device_id <= 4999 {
         return true;
     }
-    
+
     // Check for ending patterns that suggest infrastructure
     id_str.ends_with("46") || // RS485 converters often end in 46
     id_str.ends_with("00") || // Infrastructure devices often end in 00
     id_str.ends_with("01") || // Primary controllers often end in 01
-    id_str.ends_with("99")    // Management devices often end in 99
+    id_str.ends_with("99") // Management devices often end in 99
 }
 
 /// Discover devices behind a router using enhanced strategies for Niagara and RS485
-fn discover_devices_behind_router(socket: &UdpSocket, router: &DiscoveredDevice) -> Result<Vec<DiscoveredDevice>, Box<dyn std::error::Error>> {
+fn discover_devices_behind_router(
+    socket: &UdpSocket,
+    router: &DiscoveredDevice,
+) -> Result<Vec<DiscoveredDevice>, Box<dyn std::error::Error>> {
     let mut devices = Vec::new();
-    
-    println!("    Discovering devices behind {} (Router ID: {})", 
-             if router.device_id == 5046 { "IP-RS485 Converter" } else { "Niagara Controller" }, 
-             router.device_id);
-    
+
+    println!(
+        "    Discovering devices behind {} (Router ID: {})",
+        if router.device_id == 5046 {
+            "IP-RS485 Converter"
+        } else {
+            "Niagara Controller"
+        },
+        router.device_id
+    );
+
     // Strategy 1: Try to read router's routing table and network information
     match read_router_network_info(socket, router.address, router.device_id) {
         Ok(downstream_devices) => {
-            println!("      Found {} devices via routing table", downstream_devices.len());
+            println!(
+                "      Found {} devices via routing table",
+                downstream_devices.len()
+            );
             devices.extend(downstream_devices);
         }
         Err(_) => {
             println!("      Could not read routing table, using discovery patterns");
         }
     }
-    
+
     // Strategy 2: Enhanced device range discovery based on router type
     let discovery_ranges = get_device_ranges_for_router(router.device_id);
-    
+
     for (range_name, range) in discovery_ranges {
         println!("      Checking {} range: {:?}", range_name, range);
-        
+
         for test_id in range {
             // For each potential device ID, try a quick Who-Is to see if it responds
             if let Ok(device) = attempt_device_discovery(socket, router.address, test_id) {
@@ -453,7 +494,7 @@ fn discover_devices_behind_router(socket: &UdpSocket, router: &DiscoveredDevice)
             }
         }
     }
-    
+
     // Strategy 3: Known device patterns for specific router types
     if router.device_id == 5046 {
         // For IP-RS485 converter 5046, we know devices 5047 and 1 should be behind it
@@ -467,23 +508,26 @@ fn discover_devices_behind_router(socket: &UdpSocket, router: &DiscoveredDevice)
                     vendor_id: Some(0),
                     max_apdu_length: Some(1476),
                 });
-                println!("        Added known device {} behind RS485 converter", device_id);
+                println!(
+                    "        Added known device {} behind RS485 converter",
+                    device_id
+                );
             }
         }
     }
-    
+
     Ok(devices)
 }
 
 /// Get device ID ranges to check based on router type
 fn get_device_ranges_for_router(router_id: u32) -> Vec<(&'static str, std::ops::Range<u32>)> {
     let mut ranges = Vec::new();
-    
+
     // Common ranges for all routers
     ranges.push(("Sequential", router_id + 1..router_id + 10));
     ranges.push(("Low Range", 1..50));
     ranges.push(("Common Range", 100..150));
-    
+
     // Specific ranges based on router ID patterns
     if router_id >= 5000 && router_id <= 5999 {
         // For 5xxx routers (like 5046), check nearby devices
@@ -501,17 +545,21 @@ fn get_device_ranges_for_router(router_id: u32) -> Vec<(&'static str, std::ops::
         ranges.push(("Primary Network", 100..300));
         ranges.push(("Secondary Network", 1000..1200));
     }
-    
+
     ranges
 }
 
 /// Attempt to discover a specific device ID behind a router
-fn attempt_device_discovery(_socket: &UdpSocket, router_addr: SocketAddr, device_id: u32) -> Result<DiscoveredDevice, Box<dyn std::error::Error>> {
+fn attempt_device_discovery(
+    _socket: &UdpSocket,
+    router_addr: SocketAddr,
+    device_id: u32,
+) -> Result<DiscoveredDevice, Box<dyn std::error::Error>> {
     // This is a simplified check - in a real implementation, we would:
     // 1. Send a routed Who-Is message for the specific device ID
     // 2. Wait for I-Am response
     // 3. Verify the device is reachable through the router
-    
+
     // For now, create a placeholder device that would be verified in actual communication
     Ok(DiscoveredDevice {
         device_id,
@@ -523,21 +571,28 @@ fn attempt_device_discovery(_socket: &UdpSocket, router_addr: SocketAddr, device
 }
 
 /// Read router network information to discover downstream devices
-fn read_router_network_info(_socket: &UdpSocket, router_addr: SocketAddr, router_id: u32) -> Result<Vec<DiscoveredDevice>, Box<dyn std::error::Error>> {
+fn read_router_network_info(
+    _socket: &UdpSocket,
+    router_addr: SocketAddr,
+    router_id: u32,
+) -> Result<Vec<DiscoveredDevice>, Box<dyn std::error::Error>> {
     // Enhanced router table reading for Niagara controllers and RS485 converters
-    println!("      Reading network information from router {}", router_id);
-    
+    println!(
+        "      Reading network information from router {}",
+        router_id
+    );
+
     // Try to read multiple router-specific properties:
     // - Property 32: Protocol Services Supported
-    // - Property 123: Network Number List  
+    // - Property 123: Network Number List
     // - Property 130: Routing Table
     // - Property 442: Network Port (for Niagara controllers)
-    
+
     let mut downstream_devices = Vec::new();
-    
+
     // For demonstration, we'll return known devices for specific routers
     // In a real implementation, this would involve actual BACnet property reads
-    
+
     if router_id == 5046 {
         // Known devices behind IP-RS485 converter 5046
         downstream_devices.push(DiscoveredDevice {
@@ -547,42 +602,44 @@ fn read_router_network_info(_socket: &UdpSocket, router_addr: SocketAddr, router
             vendor_id: Some(0),
             max_apdu_length: Some(1476),
         });
-        
+
         downstream_devices.push(DiscoveredDevice {
             device_id: 1,
             address: router_addr,
             is_router: false,
-            vendor_id: Some(0), 
+            vendor_id: Some(0),
             max_apdu_length: Some(1476),
         });
     }
-    
+
     Ok(downstream_devices)
 }
 
-
 /// Discover the device ID by sending Who-Is and waiting for I-Am response
-fn discover_device_id(socket: &UdpSocket, target_addr: SocketAddr) -> Result<u32, Box<dyn std::error::Error>> {
+fn discover_device_id(
+    socket: &UdpSocket,
+    target_addr: SocketAddr,
+) -> Result<u32, Box<dyn std::error::Error>> {
     // Send Who-Is request to the specific device
     let whois = WhoIsRequest::new();
     let mut buffer = Vec::new();
     whois.encode(&mut buffer)?;
-    
+
     // Create NPDU for unicast
     let mut npdu = Npdu::new();
     npdu.control.expecting_reply = false; // Unconfirmed service
     npdu.control.priority = 0;
     let npdu_buffer = npdu.encode();
-    
+
     // Create unconfirmed service request APDU
     let mut apdu = vec![0x10]; // Unconfirmed-Request PDU type
     apdu.push(UnconfirmedServiceChoice::WhoIs as u8);
     apdu.extend_from_slice(&buffer);
-    
+
     // Combine NPDU and APDU
     let mut message = npdu_buffer;
     message.extend_from_slice(&apdu);
-    
+
     // Wrap in BVLC header for BACnet/IP (unicast)
     let mut bvlc_message = vec![
         0x81, // BVLC Type
@@ -590,19 +647,19 @@ fn discover_device_id(socket: &UdpSocket, target_addr: SocketAddr) -> Result<u32
         0x00, 0x00, // Length placeholder
     ];
     bvlc_message.extend_from_slice(&message);
-    
+
     // Update BVLC length
     let total_len = bvlc_message.len() as u16;
     bvlc_message[2] = (total_len >> 8) as u8;
     bvlc_message[3] = (total_len & 0xFF) as u8;
-    
+
     // Send Who-Is
     socket.send_to(&bvlc_message, target_addr)?;
-    
+
     // Wait for I-Am response
     let mut recv_buffer = [0u8; 1500];
     let start_time = Instant::now();
-    
+
     while start_time.elapsed() < Duration::from_secs(3) {
         match socket.recv_from(&mut recv_buffer) {
             Ok((len, source)) => {
@@ -620,7 +677,7 @@ fn discover_device_id(socket: &UdpSocket, target_addr: SocketAddr) -> Result<u32
             }
         }
     }
-    
+
     Err("Failed to discover device ID - no I-Am response received".into())
 }
 
@@ -675,25 +732,41 @@ fn process_iam_response(data: &[u8]) -> Option<u32> {
 }
 
 /// Read the device's object-list property to discover all objects
-fn read_device_object_list(socket: &UdpSocket, target_addr: SocketAddr, device_id: u32) -> Result<Vec<ObjectIdentifier>, Box<dyn std::error::Error>> {
+fn read_device_object_list(
+    socket: &UdpSocket,
+    target_addr: SocketAddr,
+    device_id: u32,
+) -> Result<Vec<ObjectIdentifier>, Box<dyn std::error::Error>> {
     // Create ReadPropertyMultiple request for device object list
     let device_object = ObjectIdentifier::new(ObjectType::Device, device_id);
-    
+
     let property_ref = PropertyReference::new(76); // Object_List property
     let read_spec = ReadAccessSpecification::new(device_object, vec![property_ref]);
     let rpm_request = ReadPropertyMultipleRequest::new(vec![read_spec]);
 
     // Send the request
     let invoke_id = 1;
-    let response_data = send_confirmed_request(socket, target_addr, invoke_id, ConfirmedServiceChoice::ReadPropertyMultiple as u8, &encode_rpm_request(&rpm_request)?)?;
+    let response_data = send_confirmed_request(
+        socket,
+        target_addr,
+        invoke_id,
+        ConfirmedServiceChoice::ReadPropertyMultiple as u8,
+        &encode_rpm_request(&rpm_request)?,
+    )?;
 
     // Parse the response to extract object identifiers
     let object_list = parse_object_list_response(&response_data)?;
-    
+
     println!("Device object list contains {} objects", object_list.len());
     for (i, obj) in object_list.iter().enumerate() {
-        if i < 10 { // Show first 10 for preview
-            println!("  {}: {} Instance {}", i + 1, get_object_type_name(obj.object_type), obj.instance);
+        if i < 10 {
+            // Show first 10 for preview
+            println!(
+                "  {}: {} Instance {}",
+                i + 1,
+                get_object_type_name(obj.object_type),
+                obj.instance
+            );
         } else if i == 10 {
             println!("  ... and {} more objects", object_list.len() - 10);
             break;
@@ -704,32 +777,42 @@ fn read_device_object_list(socket: &UdpSocket, target_addr: SocketAddr, device_i
 }
 
 /// Read properties for multiple objects using ReadPropertyMultiple
-fn read_objects_properties(socket: &UdpSocket, target_addr: SocketAddr, objects: &[ObjectIdentifier]) -> Result<Vec<ObjectInfo>, Box<dyn std::error::Error>> {
+fn read_objects_properties(
+    socket: &UdpSocket,
+    target_addr: SocketAddr,
+    objects: &[ObjectIdentifier],
+) -> Result<Vec<ObjectInfo>, Box<dyn std::error::Error>> {
     let mut objects_info = Vec::new();
     let batch_size = 5; // Read properties for 5 objects at a time to avoid large responses
 
     for chunk in objects.chunks(batch_size) {
         println!("Reading properties for {} objects...", chunk.len());
-        
+
         let mut read_specs = Vec::new();
-        
+
         for obj in chunk {
             let mut property_refs = Vec::new();
-            
+
             // Always try to read these basic properties
             property_refs.push(PropertyReference::new(77)); // Object_Name
             property_refs.push(PropertyReference::new(28)); // Description
-            
+
             // Add Present_Value for input/output/value objects
             match obj.object_type {
-                ObjectType::AnalogInput | ObjectType::AnalogOutput | ObjectType::AnalogValue |
-                ObjectType::BinaryInput | ObjectType::BinaryOutput | ObjectType::BinaryValue |
-                ObjectType::MultiStateInput | ObjectType::MultiStateOutput | ObjectType::MultiStateValue => {
+                ObjectType::AnalogInput
+                | ObjectType::AnalogOutput
+                | ObjectType::AnalogValue
+                | ObjectType::BinaryInput
+                | ObjectType::BinaryOutput
+                | ObjectType::BinaryValue
+                | ObjectType::MultiStateInput
+                | ObjectType::MultiStateOutput
+                | ObjectType::MultiStateValue => {
                     property_refs.push(PropertyReference::new(85)); // Present_Value
                 }
                 _ => {}
             }
-            
+
             // Add Units for analog objects
             match obj.object_type {
                 ObjectType::AnalogInput | ObjectType::AnalogOutput | ObjectType::AnalogValue => {
@@ -737,15 +820,21 @@ fn read_objects_properties(socket: &UdpSocket, target_addr: SocketAddr, objects:
                 }
                 _ => {}
             }
-            
+
             read_specs.push(ReadAccessSpecification::new(*obj, property_refs));
         }
 
         let rpm_request = ReadPropertyMultipleRequest::new(read_specs);
-        
+
         // Send request
         let invoke_id = (objects_info.len() / batch_size + 2) as u8; // Unique invoke ID
-        match send_confirmed_request(socket, target_addr, invoke_id, ConfirmedServiceChoice::ReadPropertyMultiple as u8, &encode_rpm_request(&rpm_request)?) {
+        match send_confirmed_request(
+            socket,
+            target_addr,
+            invoke_id,
+            ConfirmedServiceChoice::ReadPropertyMultiple as u8,
+            &encode_rpm_request(&rpm_request)?,
+        ) {
             Ok(response_data) => {
                 match parse_rpm_response(&response_data, chunk) {
                     Ok(mut batch_info) => {
@@ -769,7 +858,7 @@ fn read_objects_properties(socket: &UdpSocket, target_addr: SocketAddr, objects:
                 }
             }
         }
-        
+
         // Small delay between requests
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -778,7 +867,13 @@ fn read_objects_properties(socket: &UdpSocket, target_addr: SocketAddr, objects:
 }
 
 /// Send a confirmed request and wait for response
-fn send_confirmed_request(socket: &UdpSocket, target_addr: SocketAddr, invoke_id: u8, service_choice: u8, service_data: &[u8]) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+fn send_confirmed_request(
+    socket: &UdpSocket,
+    target_addr: SocketAddr,
+    invoke_id: u8,
+    service_choice: u8,
+    service_data: &[u8],
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     // Create confirmed request APDU
     let apdu = Apdu::ConfirmedRequest {
         segmented: false,
@@ -825,13 +920,15 @@ fn send_confirmed_request(socket: &UdpSocket, target_addr: SocketAddr, invoke_id
     // Wait for response
     let mut recv_buffer = [0u8; 1500];
     let start_time = Instant::now();
-    
+
     while start_time.elapsed() < Duration::from_secs(5) {
         match socket.recv_from(&mut recv_buffer) {
             Ok((len, source)) => {
                 if source == target_addr {
                     // Process response
-                    if let Some(response_data) = process_confirmed_response(&recv_buffer[..len], invoke_id) {
+                    if let Some(response_data) =
+                        process_confirmed_response(&recv_buffer[..len], invoke_id)
+                    {
                         return Ok(response_data);
                     }
                 }
@@ -868,7 +965,7 @@ fn process_confirmed_response(data: &[u8], expected_invoke_id: u8) -> Option<Vec
 
     // Decode NPDU
     let (_npdu, npdu_len) = Npdu::decode(&data[npdu_start..]).ok()?;
-    
+
     // Skip to APDU
     let apdu_start = npdu_start + npdu_len;
     if data.len() <= apdu_start {
@@ -877,18 +974,30 @@ fn process_confirmed_response(data: &[u8], expected_invoke_id: u8) -> Option<Vec
 
     // Decode APDU
     let apdu = Apdu::decode(&data[apdu_start..]).ok()?;
-    
+
     match apdu {
-        Apdu::ComplexAck { invoke_id, service_data, .. } => {
+        Apdu::ComplexAck {
+            invoke_id,
+            service_data,
+            ..
+        } => {
             if invoke_id == expected_invoke_id {
                 Some(service_data)
             } else {
                 None
             }
         }
-        Apdu::Error { invoke_id, error_class, error_code, .. } => {
+        Apdu::Error {
+            invoke_id,
+            error_class,
+            error_code,
+            ..
+        } => {
             if invoke_id == expected_invoke_id {
-                println!("    Error response: class={}, code={}", error_class, error_code);
+                println!(
+                    "    Error response: class={}, code={}",
+                    error_class, error_code
+                );
             }
             None
         }
@@ -897,55 +1006,63 @@ fn process_confirmed_response(data: &[u8], expected_invoke_id: u8) -> Option<Vec
 }
 
 /// Encode ReadPropertyMultiple request (simplified)
-fn encode_rpm_request(request: &ReadPropertyMultipleRequest) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+fn encode_rpm_request(
+    request: &ReadPropertyMultipleRequest,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let mut buffer = Vec::new();
-    
+
     for spec in &request.read_access_specifications {
         // Object identifier - context tag 0
-        let object_id = encode_object_id(spec.object_identifier.object_type as u16, spec.object_identifier.instance);
+        let object_id = encode_object_id(
+            spec.object_identifier.object_type as u16,
+            spec.object_identifier.instance,
+        );
         buffer.push(0x0C); // Context tag 0, length 4
         buffer.extend_from_slice(&object_id.to_be_bytes());
-        
+
         // Property references - context tag 1 (opening tag)
         buffer.push(0x1E); // Context tag 1, opening tag
-        
+
         for prop_ref in &spec.property_references {
             // Property identifier
             buffer.push(0x09); // Context tag 0 (within property reference), length 1
             buffer.push(prop_ref.property_identifier as u8);
-            
+
             // Array index (optional)
             if let Some(array_index) = prop_ref.property_array_index {
                 buffer.push(0x19); // Context tag 1 (within property reference), length 1
                 buffer.push(array_index as u8);
             }
         }
-        
+
         buffer.push(0x1F); // Context tag 1, closing tag
     }
-    
+
     Ok(buffer)
 }
 
 /// Parse object list response to extract object identifiers
-fn parse_object_list_response(data: &[u8]) -> Result<Vec<ObjectIdentifier>, Box<dyn std::error::Error>> {
+fn parse_object_list_response(
+    data: &[u8],
+) -> Result<Vec<ObjectIdentifier>, Box<dyn std::error::Error>> {
     let mut objects = Vec::new();
     let mut pos = 0;
-    
+
     // Simple approach - scan for all object identifiers
     while pos + 5 <= data.len() {
-        if data[pos] == 0xC4 { // Application tag for object identifier
+        if data[pos] == 0xC4 {
+            // Application tag for object identifier
             pos += 1;
             let obj_id_bytes = [data[pos], data[pos + 1], data[pos + 2], data[pos + 3]];
             let obj_id = u32::from_be_bytes(obj_id_bytes);
             let (obj_type, instance) = decode_object_id(obj_id);
-            
+
             // Skip the device object itself
             if obj_type == 8 {
                 pos += 4;
                 continue;
             }
-            
+
             if let Ok(object_type) = ObjectType::try_from(obj_type) {
                 objects.push(ObjectIdentifier::new(object_type, instance));
             }
@@ -954,64 +1071,71 @@ fn parse_object_list_response(data: &[u8]) -> Result<Vec<ObjectIdentifier>, Box<
             pos += 1;
         }
     }
-    
+
     Ok(objects)
 }
 
 /// Parse ReadPropertyMultiple response - simplified for this device format
-fn parse_rpm_response(data: &[u8], objects: &[ObjectIdentifier]) -> Result<Vec<ObjectInfo>, Box<dyn std::error::Error>> {
+fn parse_rpm_response(
+    data: &[u8],
+    objects: &[ObjectIdentifier],
+) -> Result<Vec<ObjectInfo>, Box<dyn std::error::Error>> {
     let mut objects_info = Vec::new();
-    
+
     // Create ObjectInfo for each requested object first
     for obj in objects {
         objects_info.push(ObjectInfo::new(*obj));
     }
-    
+
     // Try to parse the response data to extract property values
     let mut pos = 0;
     let mut current_obj_index = 0;
-    
+
     // Debug: comment out for clean output
     // println!("Debug: Parsing RPM response with {} bytes for {} objects", data.len(), objects.len());
-    
+
     while pos < data.len() && current_obj_index < objects_info.len() {
         // Look for object identifier context tag (0x0C)
         while pos < data.len() && data[pos] != 0x0C {
             pos += 1;
         }
-        
+
         if pos >= data.len() {
             break;
         }
-        
+
         pos += 5; // Skip object identifier
-        
+
         // Look for property results opening tag (0x1E)
         while pos < data.len() && data[pos] != 0x1E {
             pos += 1;
         }
-        
+
         if pos >= data.len() {
             break;
         }
-        
+
         pos += 1; // Skip opening tag
-        
+
         // Parse properties sequentially in the order they appear
         // This device seems to send: Object_Name, Present_Value, Units (for analog objects)
-        
+
         // First property: Object_Name (character string)
-        if pos < data.len() && data[pos] == 0x29 { // Skip property error/success tag
+        if pos < data.len() && data[pos] == 0x29 {
+            // Skip property error/success tag
             pos += 1;
         }
-        if pos < data.len() && data[pos] == 0x4D { // Another tag
+        if pos < data.len() && data[pos] == 0x4D {
+            // Another tag
             pos += 1;
         }
-        if pos < data.len() && data[pos] == 0x4E { // Property value opening tag
+        if pos < data.len() && data[pos] == 0x4E {
+            // Property value opening tag
             pos += 1;
         }
-        
-        if pos < data.len() && data[pos] == 0x75 { // Character string tag
+
+        if pos < data.len() && data[pos] == 0x75 {
+            // Character string tag
             if let Some((name, consumed)) = extract_character_string(&data[pos..]) {
                 // Debug: comment out for clean output
                 // println!("Debug: Extracted object name: '{}'", name);
@@ -1019,17 +1143,26 @@ fn parse_rpm_response(data: &[u8], objects: &[ObjectIdentifier]) -> Result<Vec<O
                 pos += consumed;
             }
         }
-        
+
         // Skip any intermediate tags and look for present value
         while pos < data.len() && data[pos] != 0x44 && data[pos] != 0x11 && data[pos] != 0x1F {
             pos += 1;
         }
-        
+
         // Present value (real for analog, boolean for binary)
-        match objects_info[current_obj_index].object_identifier.object_type {
+        match objects_info[current_obj_index]
+            .object_identifier
+            .object_type
+        {
             ObjectType::AnalogInput | ObjectType::AnalogOutput | ObjectType::AnalogValue => {
-                if pos < data.len() && data[pos] == 0x44 { // Real value tag
-                    if let Some((value, consumed)) = extract_present_value(&data[pos..], objects_info[current_obj_index].object_identifier.object_type) {
+                if pos < data.len() && data[pos] == 0x44 {
+                    // Real value tag
+                    if let Some((value, consumed)) = extract_present_value(
+                        &data[pos..],
+                        objects_info[current_obj_index]
+                            .object_identifier
+                            .object_type,
+                    ) {
                         // Debug: comment out for clean output
                         // println!("Debug: Extracted present value: '{}'", value);
                         objects_info[current_obj_index].present_value = Some(value);
@@ -1038,8 +1171,14 @@ fn parse_rpm_response(data: &[u8], objects: &[ObjectIdentifier]) -> Result<Vec<O
                 }
             }
             ObjectType::BinaryInput | ObjectType::BinaryOutput | ObjectType::BinaryValue => {
-                if pos < data.len() && data[pos] == 0x11 { // Boolean value tag
-                    if let Some((value, consumed)) = extract_present_value(&data[pos..], objects_info[current_obj_index].object_identifier.object_type) {
+                if pos < data.len() && data[pos] == 0x11 {
+                    // Boolean value tag
+                    if let Some((value, consumed)) = extract_present_value(
+                        &data[pos..],
+                        objects_info[current_obj_index]
+                            .object_identifier
+                            .object_type,
+                    ) {
                         // Debug: comment out for clean output
                         // println!("Debug: Extracted present value: '{}'", value);
                         objects_info[current_obj_index].present_value = Some(value);
@@ -1049,14 +1188,15 @@ fn parse_rpm_response(data: &[u8], objects: &[ObjectIdentifier]) -> Result<Vec<O
             }
             _ => {}
         }
-        
+
         // Skip any intermediate content and look for units (enumerated tag 0x91)
         while pos < data.len() && data[pos] != 0x91 && data[pos] != 0x1F {
             pos += 1;
         }
-        
+
         // Units (for analog objects)
-        if pos < data.len() && data[pos] == 0x91 { // Enumerated tag
+        if pos < data.len() && data[pos] == 0x91 {
+            // Enumerated tag
             if let Some((units, consumed)) = extract_units(&data[pos..]) {
                 // Debug: comment out for clean output
                 // println!("Debug: Extracted units: '{}'", units);
@@ -1064,7 +1204,7 @@ fn parse_rpm_response(data: &[u8], objects: &[ObjectIdentifier]) -> Result<Vec<O
                 pos += consumed;
             }
         }
-        
+
         // Find closing tag 0x1F
         while pos < data.len() && data[pos] != 0x1F {
             pos += 1;
@@ -1072,10 +1212,10 @@ fn parse_rpm_response(data: &[u8], objects: &[ObjectIdentifier]) -> Result<Vec<O
         if pos < data.len() && data[pos] == 0x1F {
             pos += 1; // Skip closing tag
         }
-        
+
         current_obj_index += 1;
     }
-    
+
     // Debug: comment out for clean output
     // println!("Debug: Successfully parsed {} objects", current_obj_index);
     Ok(objects_info)
@@ -1083,19 +1223,20 @@ fn parse_rpm_response(data: &[u8], objects: &[ObjectIdentifier]) -> Result<Vec<O
 
 /// Extract character string from BACnet encoded data
 fn extract_character_string(data: &[u8]) -> Option<(String, usize)> {
-    if data.len() < 2 || data[0] != 0x75 { // Character string tag
+    if data.len() < 2 || data[0] != 0x75 {
+        // Character string tag
         return None;
     }
-    
+
     let length = data[1] as usize;
     if data.len() < 2 + length || length == 0 {
         return None;
     }
-    
+
     // Check encoding byte
     let encoding = data[2];
     let string_data = &data[3..2 + length];
-    
+
     let string = match encoding {
         0 => {
             // ANSI X3.4 (ASCII)
@@ -1118,7 +1259,7 @@ fn extract_character_string(data: &[u8]) -> Option<(String, usize)> {
             String::from_utf8_lossy(string_data).to_string()
         }
     };
-    
+
     Some((string, 2 + length))
 }
 
@@ -1127,10 +1268,11 @@ fn extract_present_value(data: &[u8], object_type: ObjectType) -> Option<(String
     if data.is_empty() {
         return None;
     }
-    
+
     match object_type {
         ObjectType::AnalogInput | ObjectType::AnalogOutput | ObjectType::AnalogValue => {
-            if data.len() >= 5 && data[0] == 0x44 { // Real value tag
+            if data.len() >= 5 && data[0] == 0x44 {
+                // Real value tag
                 let bytes = [data[1], data[2], data[3], data[4]];
                 let value = f32::from_be_bytes(bytes);
                 Some((format!("{:.2}", value), 5))
@@ -1139,22 +1281,33 @@ fn extract_present_value(data: &[u8], object_type: ObjectType) -> Option<(String
             }
         }
         ObjectType::BinaryInput | ObjectType::BinaryOutput | ObjectType::BinaryValue => {
-            if data.len() >= 2 && data[0] == 0x11 { // Boolean tag
+            if data.len() >= 2 && data[0] == 0x11 {
+                // Boolean tag
                 let value = data[1] != 0;
-                Some((if value { "Active".to_string() } else { "Inactive".to_string() }, 2))
+                Some((
+                    if value {
+                        "Active".to_string()
+                    } else {
+                        "Inactive".to_string()
+                    },
+                    2,
+                ))
             } else {
                 None
             }
         }
-        ObjectType::MultiStateInput | ObjectType::MultiStateOutput | ObjectType::MultiStateValue => {
-            if data.len() >= 2 && data[0] == 0x21 { // Unsigned int tag
+        ObjectType::MultiStateInput
+        | ObjectType::MultiStateOutput
+        | ObjectType::MultiStateValue => {
+            if data.len() >= 2 && data[0] == 0x21 {
+                // Unsigned int tag
                 let value = data[1];
                 Some((format!("State {}", value), 2))
             } else {
                 None
             }
         }
-        _ => Some(("N/A".to_string(), 1))
+        _ => Some(("N/A".to_string(), 1)),
     }
 }
 
@@ -1180,7 +1333,7 @@ fn get_object_type_name(object_type: ObjectType) -> &'static str {
     match object_type {
         ObjectType::Device => "Device",
         ObjectType::AnalogInput => "Analog Input",
-        ObjectType::AnalogOutput => "Analog Output", 
+        ObjectType::AnalogOutput => "Analog Output",
         ObjectType::AnalogValue => "Analog Value",
         ObjectType::BinaryInput => "Binary Input",
         ObjectType::BinaryOutput => "Binary Output",
@@ -1211,4 +1364,3 @@ fn get_object_type_name(object_type: ObjectType) -> &'static str {
         ObjectType::AccessDoor => "Access Door",
     }
 }
-

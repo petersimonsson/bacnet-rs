@@ -4,10 +4,9 @@
 //! including object management, property access, and search capabilities.
 
 use bacnet_rs::object::{
-    ObjectDatabase, DatabaseBuilder, ObjectIdentifier, ObjectType, 
+    AnalogInput, AnalogValue, BinaryInput, BinaryOutput, BinaryPV, DatabaseBuilder, Device,
+    EngineeringUnits, MultiStateValue, ObjectDatabase, ObjectIdentifier, ObjectType,
     PropertyIdentifier, PropertyValue,
-    Device, AnalogInput, AnalogValue, BinaryInput, BinaryOutput,
-    MultiStateValue, EngineeringUnits, BinaryPV,
 };
 use std::thread;
 use std::time::Duration;
@@ -19,9 +18,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Demo 1: Create database with builder
     println!("1. Creating Object Database");
     println!("--------------------------");
-    
+
     let db = create_sample_database()?;
-    
+
     let stats = db.statistics();
     println!("Database created with:");
     println!("  Total objects: {}", stats.total_objects);
@@ -53,49 +52,49 @@ fn create_sample_database() -> Result<ObjectDatabase, Box<dyn std::error::Error>
     let mut device = Device::new(5000, "Demo Controller".to_string());
     device.vendor_name = "BACnet-RS Demo".to_string();
     device.model_name = "Virtual Device v1.0".to_string();
-    
+
     // Create analog inputs for temperature sensors
     let mut ai1 = AnalogInput::new(1, "Zone 1 Temperature".to_string());
     ai1.present_value = 22.5;
     ai1.units = EngineeringUnits::DegreesCelsius;
     ai1.description = "Conference Room Temperature".to_string();
-    
+
     let mut ai2 = AnalogInput::new(2, "Zone 2 Temperature".to_string());
     ai2.present_value = 21.8;
     ai2.units = EngineeringUnits::DegreesCelsius;
     ai2.description = "Office Area Temperature".to_string();
-    
+
     let mut ai3 = AnalogInput::new(3, "Outside Temperature".to_string());
     ai3.present_value = 15.2;
     ai3.units = EngineeringUnits::DegreesCelsius;
     ai3.description = "Outdoor Air Temperature".to_string();
-    
+
     // Create analog values for setpoints
     let mut av1 = AnalogValue::new(1, "Zone 1 Setpoint".to_string());
     av1.present_value = 22.0;
     av1.units = EngineeringUnits::DegreesCelsius;
-    
+
     let mut av2 = AnalogValue::new(2, "Zone 2 Setpoint".to_string());
     av2.present_value = 21.0;
     av2.units = EngineeringUnits::DegreesCelsius;
-    
+
     // Create binary inputs for status
     let mut bi1 = BinaryInput::new(1, "Zone 1 Occupancy".to_string());
     bi1.present_value = BinaryPV::Active;
     bi1.active_text = "Occupied".to_string();
     bi1.inactive_text = "Unoccupied".to_string();
-    
+
     let mut bi2 = BinaryInput::new(2, "Fire Alarm".to_string());
     bi2.present_value = BinaryPV::Inactive;
     bi2.active_text = "ALARM".to_string();
     bi2.inactive_text = "Normal".to_string();
-    
+
     // Create binary outputs for control
     let mut bo1 = BinaryOutput::new(1, "Zone 1 Heating".to_string());
     bo1.present_value = BinaryPV::Active;
     bo1.active_text = "Heating".to_string();
     bo1.inactive_text = "Off".to_string();
-    
+
     // Create multi-state value for system mode
     let mut msv1 = MultiStateValue::new(1, "System Mode".to_string(), 4);
     msv1.present_value = 2; // Auto mode
@@ -105,7 +104,7 @@ fn create_sample_database() -> Result<ObjectDatabase, Box<dyn std::error::Error>
         "Cooling".to_string(),
         "Auto".to_string(),
     ];
-    
+
     // Build database
     let db = DatabaseBuilder::new()
         .with_device(device)
@@ -119,7 +118,7 @@ fn create_sample_database() -> Result<ObjectDatabase, Box<dyn std::error::Error>
         .add_object(Box::new(bo1))
         .add_object(Box::new(msv1))
         .build()?;
-    
+
     Ok(db)
 }
 
@@ -127,17 +126,18 @@ fn create_sample_database() -> Result<ObjectDatabase, Box<dyn std::error::Error>
 fn demo_object_operations(db: &ObjectDatabase) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n2. Object Operations");
     println!("-------------------");
-    
+
     // Get device object
     let device_id = db.get_device_id();
-    println!("Device: {} (Instance {})", 
+    println!(
+        "Device: {} (Instance {})",
         match db.get_property(device_id, PropertyIdentifier::ObjectName)? {
             PropertyValue::CharacterString(name) => name,
             _ => "Unknown".to_string(),
         },
         device_id.instance
     );
-    
+
     // List all objects
     println!("\nAll objects in database:");
     let all_objects = db.get_all_objects();
@@ -146,24 +146,29 @@ fn demo_object_operations(db: &ObjectDatabase) -> Result<(), Box<dyn std::error:
             PropertyValue::CharacterString(n) => n,
             _ => "Unknown".to_string(),
         };
-        println!("  {} {} - {}", 
+        println!(
+            "  {} {} - {}",
             format_object_type(obj_id.object_type),
             obj_id.instance,
             name
         );
     }
-    
+
     // Get objects by type
     println!("\nAnalog Inputs:");
     let analog_inputs = db.get_objects_by_type(ObjectType::AnalogInput);
     for obj_id in &analog_inputs {
-        if let Ok(PropertyValue::CharacterString(name)) = db.get_property(*obj_id, PropertyIdentifier::ObjectName) {
-            if let Ok(PropertyValue::Real(value)) = db.get_property(*obj_id, PropertyIdentifier::PresentValue) {
+        if let Ok(PropertyValue::CharacterString(name)) =
+            db.get_property(*obj_id, PropertyIdentifier::ObjectName)
+        {
+            if let Ok(PropertyValue::Real(value)) =
+                db.get_property(*obj_id, PropertyIdentifier::PresentValue)
+            {
                 println!("  {} - {}: {:.1}°C", obj_id.instance, name, value);
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -171,17 +176,17 @@ fn demo_object_operations(db: &ObjectDatabase) -> Result<(), Box<dyn std::error:
 fn demo_property_access(db: &ObjectDatabase) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n3. Property Access");
     println!("-----------------");
-    
+
     // Read properties
     let ai1_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
-    
+
     println!("Reading AI:1 properties:");
     let properties = [
         PropertyIdentifier::ObjectIdentifier,
         PropertyIdentifier::ObjectName,
         PropertyIdentifier::PresentValue,
     ];
-    
+
     for prop_id in properties {
         match db.get_property(ai1_id, prop_id) {
             Ok(value) => {
@@ -190,30 +195,30 @@ fn demo_property_access(db: &ObjectDatabase) -> Result<(), Box<dyn std::error::E
             Err(_) => {} // Skip properties that aren't available
         }
     }
-    
+
     // Modify properties
     println!("\nModifying AV:1 present value:");
     let av1_id = ObjectIdentifier::new(ObjectType::AnalogValue, 1);
-    
+
     let old_value = match db.get_property(av1_id, PropertyIdentifier::PresentValue)? {
         PropertyValue::Real(v) => v,
         _ => 0.0,
     };
     println!("  Old value: {:.1}°C", old_value);
-    
+
     db.set_property(
         av1_id,
         PropertyIdentifier::PresentValue,
-        PropertyValue::Real(23.5)
+        PropertyValue::Real(23.5),
     )?;
-    
+
     let new_value = match db.get_property(av1_id, PropertyIdentifier::PresentValue)? {
         PropertyValue::Real(v) => v,
         _ => 0.0,
     };
     println!("  New value: {:.1}°C", new_value);
     println!("  Database revision: {}", db.revision());
-    
+
     Ok(())
 }
 
@@ -221,41 +226,43 @@ fn demo_property_access(db: &ObjectDatabase) -> Result<(), Box<dyn std::error::E
 fn demo_search_capabilities(db: &ObjectDatabase) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n4. Search Capabilities");
     println!("---------------------");
-    
+
     // Search by name
     println!("Searching for 'Zone 1 Temperature':");
     match db.get_object_by_name("Zone 1 Temperature") {
         Ok(obj_id) => {
-            println!("  Found: {} {}", 
+            println!(
+                "  Found: {} {}",
                 format_object_type(obj_id.object_type),
                 obj_id.instance
             );
         }
         Err(e) => println!("  Not found: {}", e),
     }
-    
+
     // Search by property value
     println!("\nSearching for objects with present value = 22.5:");
-    let results = db.search_by_property(
-        PropertyIdentifier::PresentValue,
-        &PropertyValue::Real(22.5)
-    );
+    let results =
+        db.search_by_property(PropertyIdentifier::PresentValue, &PropertyValue::Real(22.5));
     for obj_id in &results {
-        if let Ok(PropertyValue::CharacterString(name)) = db.get_property(*obj_id, PropertyIdentifier::ObjectName) {
-            println!("  Found: {} {} - {}", 
+        if let Ok(PropertyValue::CharacterString(name)) =
+            db.get_property(*obj_id, PropertyIdentifier::ObjectName)
+        {
+            println!(
+                "  Found: {} {} - {}",
                 format_object_type(obj_id.object_type),
                 obj_id.instance,
                 name
             );
         }
     }
-    
+
     // Check existence
     println!("\nExistence checks:");
     let test_id = ObjectIdentifier::new(ObjectType::AnalogInput, 99);
     println!("  AI:99 exists: {}", db.contains(test_id));
     println!("  'Fire Alarm' exists: {}", db.contains_name("Fire Alarm"));
-    
+
     Ok(())
 }
 
@@ -263,21 +270,24 @@ fn demo_search_capabilities(db: &ObjectDatabase) -> Result<(), Box<dyn std::erro
 fn demo_dynamic_management(db: &ObjectDatabase) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n5. Dynamic Object Management");
     println!("---------------------------");
-    
+
     let initial_count = db.object_count();
     println!("Initial object count: {}", initial_count);
-    
+
     // Add new object
     println!("\nAdding new analog input...");
     let mut ai_new = AnalogInput::new(10, "Dynamic Temperature".to_string());
     ai_new.present_value = 25.0;
     ai_new.units = EngineeringUnits::DegreesCelsius;
-    
+
     db.add_object(Box::new(ai_new))?;
     println!("  Object added successfully");
     println!("  New object count: {}", db.object_count());
-    println!("  Next AI instance: {}", db.next_instance(ObjectType::AnalogInput));
-    
+    println!(
+        "  Next AI instance: {}",
+        db.next_instance(ObjectType::AnalogInput)
+    );
+
     // Try to add duplicate
     println!("\nTrying to add duplicate object...");
     let ai_dup = AnalogInput::new(10, "Duplicate".to_string());
@@ -285,14 +295,14 @@ fn demo_dynamic_management(db: &ObjectDatabase) -> Result<(), Box<dyn std::error
         Ok(_) => println!("  Unexpected success!"),
         Err(e) => println!("  Expected error: {}", e),
     }
-    
+
     // Remove object
     println!("\nRemoving BI:2...");
     let bi2_id = ObjectIdentifier::new(ObjectType::BinaryInput, 2);
     db.remove_object(bi2_id)?;
     println!("  Object removed successfully");
     println!("  New object count: {}", db.object_count());
-    
+
     // Try to remove device (should fail)
     println!("\nTrying to remove device object...");
     let device_id = ObjectIdentifier::new(ObjectType::Device, 5000);
@@ -300,7 +310,7 @@ fn demo_dynamic_management(db: &ObjectDatabase) -> Result<(), Box<dyn std::error
         Ok(_) => println!("  Unexpected success!"),
         Err(e) => println!("  Expected error: {}", e),
     }
-    
+
     Ok(())
 }
 
@@ -308,25 +318,25 @@ fn demo_dynamic_management(db: &ObjectDatabase) -> Result<(), Box<dyn std::error
 fn demo_database_statistics(db: &ObjectDatabase) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n6. Database Statistics");
     println!("---------------------");
-    
+
     // Simulate some activity
     thread::sleep(Duration::from_millis(100));
-    
+
     let stats = db.statistics();
     println!("Current statistics:");
     println!("  Total objects: {}", stats.total_objects);
     println!("  Object types: {}", stats.object_types);
     println!("  Database revision: {}", stats.revision);
     println!("  Last modified: {:?} ago", stats.last_modified.elapsed());
-    
+
     println!("\nObject counts by type:");
     let mut type_counts: Vec<_> = stats.type_counts.iter().collect();
     type_counts.sort_by_key(|(t, _)| **t as u16);
-    
+
     for (object_type, count) in type_counts {
         println!("  {}: {}", format_object_type(*object_type), count);
     }
-    
+
     Ok(())
 }
 

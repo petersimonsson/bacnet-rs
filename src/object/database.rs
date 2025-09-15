@@ -510,4 +510,3 @@ mod tests {
         assert_eq!(db.next_instance(ObjectType::AnalogInput), 11);
     }
 }
-

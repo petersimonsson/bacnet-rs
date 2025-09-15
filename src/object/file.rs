@@ -342,4 +342,3 @@ mod tests {
         assert!(file.write_records(0, &records).is_err());
     }
 }
-

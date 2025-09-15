@@ -4,17 +4,17 @@
 //! BACnet devices behind routers on different networks.
 
 use bacnet_rs::{
-    service::{WhoIsRequest, IAmRequest, ReadPropertyRequest, ReadPropertyResponse},
-    network::{Npdu, NetworkAddress},
-    datalink::bip::{BvlcHeader, BvlcFunction},
-    vendor::get_vendor_name,
+    datalink::bip::{BvlcFunction, BvlcHeader},
+    network::{NetworkAddress, Npdu},
     object::{ObjectIdentifier, ObjectType, PropertyIdentifier},
+    service::{IAmRequest, ReadPropertyRequest, ReadPropertyResponse, WhoIsRequest},
+    vendor::get_vendor_name,
 };
 use std::{
-    net::{SocketAddr, UdpSocket},
-    time::{Duration, Instant},
     collections::HashMap,
     io::ErrorKind,
+    net::{SocketAddr, UdpSocket},
+    time::{Duration, Instant},
 };
 
 const BACNET_PORT: u16 = 0xBAC0; // 47808
@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(s) => {
                     println!("Bound to alternative port: {}", s.local_addr()?);
                     s
-                },
+                }
                 Err(e) => {
                     eprintln!("Failed to bind to any port: {}", e);
                     return Err(e.into());
@@ -56,10 +56,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     };
-    
+
     socket.set_broadcast(true)?;
     socket.set_read_timeout(Some(Duration::from_millis(100)))?;
-    
+
     println!("Listening on {}", socket.local_addr()?);
 
     // Discover routers first
@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             HashMap::new()
         }
     };
-    
+
     if routers.is_empty() {
         println!("No routers found. Trying direct device discovery...");
     } else {
@@ -85,10 +85,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Discover devices on all networks
     println!("\nStep 2: Discovering devices on all networks...");
     let mut devices = HashMap::new();
-    
+
     // First, try global broadcast
     discover_devices_global(&socket, &mut devices)?;
-    
+
     // Then try directed discovery for each known network
     for (network, _) in &routers {
         discover_devices_on_network(&socket, *network, &mut devices)?;
@@ -101,14 +101,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\nFound {} device(s) across all networks:", devices.len());
     for device in devices.values() {
-        println!("  - Device {} on Network {} (MAC: {:02X?})", 
-                 device.device_id, device.network_number, device.mac_address);
+        println!(
+            "  - Device {} on Network {} (MAC: {:02X?})",
+            device.device_id, device.network_number, device.mac_address
+        );
     }
 
     // Read properties from all discovered devices
     println!("\nStep 3: Reading properties from all devices...");
     for device in devices.values_mut() {
-        println!("\nReading Device {} on Network {}:", device.device_id, device.network_number);
+        println!(
+            "\nReading Device {} on Network {}:",
+            device.device_id, device.network_number
+        );
         read_device_properties(&socket, device);
     }
 
@@ -140,22 +145,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn discover_routers(socket: &UdpSocket) -> Result<HashMap<u16, SocketAddr>, Box<dyn std::error::Error>> {
+fn discover_routers(
+    socket: &UdpSocket,
+) -> Result<HashMap<u16, SocketAddr>, Box<dyn std::error::Error>> {
     let mut routers = HashMap::new();
-    
+
     // Create Who-Is-Router-To-Network NPDU (network layer message)
     let mut npdu = Npdu::new();
     npdu.control.network_message = true;
-    
+
     // Network message data: message type 0x01 (Who-Is-Router-To-Network)
     let network_msg = vec![0x01];
     let npdu_bytes = encode_npdu_with_data(&npdu, &network_msg);
-    
+
     // Wrap in BVLC header for broadcast
-    let header = BvlcHeader::new(BvlcFunction::OriginalBroadcastNpdu, 4 + npdu_bytes.len() as u16);
+    let header = BvlcHeader::new(
+        BvlcFunction::OriginalBroadcastNpdu,
+        4 + npdu_bytes.len() as u16,
+    );
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
-    
+
     // Send to broadcast address
     if let Err(e) = socket.send_to(&frame, "255.255.255.255:47808") {
         eprintln!("Failed to send broadcast: {}. Trying local subnet...", e);
@@ -164,11 +174,11 @@ fn discover_routers(socket: &UdpSocket) -> Result<HashMap<u16, SocketAddr>, Box<
             eprintln!("Failed to send to local subnet: {}", e);
         }
     }
-    
+
     // Listen for I-Am-Router-To-Network responses
     let start = Instant::now();
     let mut buffer = [0u8; 1500];
-    
+
     while start.elapsed() < Duration::from_secs(2) {
         match socket.recv_from(&mut buffer) {
             Ok((len, src_addr)) => {
@@ -182,7 +192,8 @@ fn discover_routers(socket: &UdpSocket) -> Result<HashMap<u16, SocketAddr>, Box<
                                 // Parse network numbers
                                 let mut idx = offset + 1;
                                 while idx + 1 < npdu_data.len() {
-                                    let network = u16::from_be_bytes([npdu_data[idx], npdu_data[idx + 1]]);
+                                    let network =
+                                        u16::from_be_bytes([npdu_data[idx], npdu_data[idx + 1]]);
                                     routers.insert(network, src_addr);
                                     idx += 2;
                                 }
@@ -198,58 +209,71 @@ fn discover_routers(socket: &UdpSocket) -> Result<HashMap<u16, SocketAddr>, Box<
             }
         }
     }
-    
+
     Ok(routers)
 }
 
-fn discover_devices_global(socket: &UdpSocket, devices: &mut HashMap<u32, RemoteDevice>) -> Result<(), Box<dyn std::error::Error>> {
+fn discover_devices_global(
+    socket: &UdpSocket,
+    devices: &mut HashMap<u32, RemoteDevice>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Create global Who-Is request
     let who_is = WhoIsRequest::new();
     let mut who_is_data = Vec::new();
     who_is.encode(&mut who_is_data)?;
-    
+
     // Create APDU for unconfirmed request
     let mut apdu = vec![0x10]; // Unconfirmed-Request PDU
     apdu.push(0x08); // Service Choice: Who-Is
     apdu.extend_from_slice(&who_is_data);
-    
+
     // Create NPDU for global broadcast
     let npdu = Npdu::global_broadcast();
     let npdu_bytes = encode_npdu_with_data(&npdu, &apdu);
-    
+
     // Wrap in BVLC header for broadcast
-    let header = BvlcHeader::new(BvlcFunction::OriginalBroadcastNpdu, 4 + npdu_bytes.len() as u16);
+    let header = BvlcHeader::new(
+        BvlcFunction::OriginalBroadcastNpdu,
+        4 + npdu_bytes.len() as u16,
+    );
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
-    
+
     // Send to broadcast address
     if let Err(e) = socket.send_to(&frame, "255.255.255.255:47808") {
-        eprintln!("Failed to send global broadcast: {}. Trying local subnet...", e);
+        eprintln!(
+            "Failed to send global broadcast: {}. Trying local subnet...",
+            e
+        );
         // Try local subnet broadcast
         if let Err(e) = socket.send_to(&frame, "192.168.1.255:47808") {
             eprintln!("Failed to send to local subnet: {}", e);
         }
     }
-    
+
     // Listen for I-Am responses
     collect_i_am_responses(socket, devices, Duration::from_secs(3))?;
-    
+
     Ok(())
 }
 
-fn discover_devices_on_network(socket: &UdpSocket, network: u16, devices: &mut HashMap<u32, RemoteDevice>) -> Result<(), Box<dyn std::error::Error>> {
+fn discover_devices_on_network(
+    socket: &UdpSocket,
+    network: u16,
+    devices: &mut HashMap<u32, RemoteDevice>,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("  Discovering devices on network {}...", network);
-    
+
     // Create Who-Is request
     let who_is = WhoIsRequest::new();
     let mut who_is_data = Vec::new();
     who_is.encode(&mut who_is_data)?;
-    
+
     // Create APDU for unconfirmed request
     let mut apdu = vec![0x10]; // Unconfirmed-Request PDU
     apdu.push(0x08); // Service Choice: Who-Is
     apdu.extend_from_slice(&who_is_data);
-    
+
     // Create NPDU with destination network
     let mut npdu = Npdu::new();
     npdu.control.destination_present = true;
@@ -258,29 +282,36 @@ fn discover_devices_on_network(socket: &UdpSocket, network: u16, devices: &mut H
         address: vec![], // Empty for broadcast
     });
     npdu.hop_count = Some(255);
-    
+
     let npdu_bytes = encode_npdu_with_data(&npdu, &apdu);
-    
+
     // Wrap in BVLC header for broadcast
-    let header = BvlcHeader::new(BvlcFunction::OriginalBroadcastNpdu, 4 + npdu_bytes.len() as u16);
+    let header = BvlcHeader::new(
+        BvlcFunction::OriginalBroadcastNpdu,
+        4 + npdu_bytes.len() as u16,
+    );
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
-    
+
     // Send to broadcast address (router will forward)
     if let Err(e) = socket.send_to(&frame, "255.255.255.255:47808") {
         eprintln!("Failed to send to network {}: {}", network, e);
     }
-    
+
     // Listen for I-Am responses
     collect_i_am_responses(socket, devices, Duration::from_secs(2))?;
-    
+
     Ok(())
 }
 
-fn collect_i_am_responses(socket: &UdpSocket, devices: &mut HashMap<u32, RemoteDevice>, timeout: Duration) -> Result<(), Box<dyn std::error::Error>> {
+fn collect_i_am_responses(
+    socket: &UdpSocket,
+    devices: &mut HashMap<u32, RemoteDevice>,
+    timeout: Duration,
+) -> Result<(), Box<dyn std::error::Error>> {
     let start = Instant::now();
     let mut buffer = [0u8; 1500];
-    
+
     while start.elapsed() < timeout {
         match socket.recv_from(&mut buffer) {
             Ok((len, src_addr)) => {
@@ -297,17 +328,19 @@ fn collect_i_am_responses(socket: &UdpSocket, devices: &mut HashMap<u32, RemoteD
                                     // Decode I-Am request
                                     if let Ok(i_am) = IAmRequest::decode(&apdu_data[2..]) {
                                         let device_id = i_am.device_identifier.instance;
-                                        
+
                                         // Determine network number and MAC address
-                                        let (network_number, mac_address) = if let Some(src_net) = npdu.source {
-                                            (src_net.network, src_net.address)
-                                        } else {
-                                            // Local network
-                                            (0, vec![])
-                                        };
-                                        
-                                        let vendor_name = get_vendor_name(i_am.vendor_identifier as u16);
-                                        
+                                        let (network_number, mac_address) =
+                                            if let Some(src_net) = npdu.source {
+                                                (src_net.network, src_net.address)
+                                            } else {
+                                                // Local network
+                                                (0, vec![])
+                                            };
+
+                                        let vendor_name =
+                                            get_vendor_name(i_am.vendor_identifier as u16);
+
                                         let device = RemoteDevice {
                                             device_id,
                                             network_number,
@@ -320,9 +353,12 @@ fn collect_i_am_responses(socket: &UdpSocket, devices: &mut HashMap<u32, RemoteD
                                             description: None,
                                             location: None,
                                         };
-                                        
+
                                         devices.insert(device_id, device);
-                                        println!("    Found device {} from {}", device_id, src_addr);
+                                        println!(
+                                            "    Found device {} from {}",
+                                            device_id, src_addr
+                                        );
                                     }
                                 }
                             }
@@ -337,27 +373,30 @@ fn collect_i_am_responses(socket: &UdpSocket, devices: &mut HashMap<u32, RemoteD
             }
         }
     }
-    
+
     Ok(())
 }
 
 fn read_device_properties(socket: &UdpSocket, device: &mut RemoteDevice) {
     println!("  Reading basic device properties...");
-    
+
     // First read basic device properties
     let basic_properties = vec![
         (PropertyIdentifier::ObjectName as u32, "Object Name"),
         (PropertyIdentifier::ModelName as u32, "Model Name"),
         (PropertyIdentifier::VendorName as u32, "Vendor Name"),
-        (PropertyIdentifier::FirmwareRevision as u32, "Firmware Revision"),
+        (
+            PropertyIdentifier::FirmwareRevision as u32,
+            "Firmware Revision",
+        ),
     ];
-    
+
     for (property_id, property_name) in basic_properties {
         print!("    Reading {}... ", property_name);
-        
+
         // Small delay between property reads
         std::thread::sleep(Duration::from_millis(100));
-        
+
         match read_property(socket, device, property_id) {
             Ok(value) => {
                 match property_id {
@@ -374,41 +413,57 @@ fn read_device_properties(socket: &UdpSocket, device: &mut RemoteDevice) {
             }
         }
     }
-    
+
     // Now read the Object-List to discover all objects
     println!("  Reading Object-List...");
     std::thread::sleep(Duration::from_millis(200));
-    
+
     match read_object_list(socket, device) {
         Ok(objects) => {
             println!("    Found {} objects:", objects.len());
-            
+
             // Read properties for each object
             for (i, obj_id) in objects.iter().enumerate() {
-                if i >= 20 { // Limit to first 20 objects to avoid overwhelming output
-                    println!("    ... and {} more objects (truncated)", objects.len() - 20);
+                if i >= 20 {
+                    // Limit to first 20 objects to avoid overwhelming output
+                    println!(
+                        "    ... and {} more objects (truncated)",
+                        objects.len() - 20
+                    );
                     break;
                 }
-                
-                println!("    Object {}: Type={}, Instance={}", 
-                         i + 1, 
-                         object_type_name(obj_id.object_type), 
-                         obj_id.instance);
-                
+
+                println!(
+                    "    Object {}: Type={}, Instance={}",
+                    i + 1,
+                    object_type_name(obj_id.object_type),
+                    obj_id.instance
+                );
+
                 // Read Object Name for each object
-                match read_object_property(socket, device, obj_id, PropertyIdentifier::ObjectName as u32) {
+                match read_object_property(
+                    socket,
+                    device,
+                    obj_id,
+                    PropertyIdentifier::ObjectName as u32,
+                ) {
                     Ok(name) => println!("      Name: {}", name),
                     Err(_) => println!("      Name: <unavailable>"),
                 }
-                
+
                 // Read Present Value if it's an I/O object
                 if is_io_object(obj_id.object_type) {
-                    match read_object_property(socket, device, obj_id, PropertyIdentifier::PresentValue as u32) {
+                    match read_object_property(
+                        socket,
+                        device,
+                        obj_id,
+                        PropertyIdentifier::PresentValue as u32,
+                    ) {
                         Ok(value) => println!("      Present Value: {}", value),
                         Err(_) => {} // Many objects don't have present value
                     }
                 }
-                
+
                 std::thread::sleep(Duration::from_millis(50)); // Small delay between objects
             }
         }
@@ -418,33 +473,37 @@ fn read_device_properties(socket: &UdpSocket, device: &mut RemoteDevice) {
     }
 }
 
-fn read_property(socket: &UdpSocket, device: &RemoteDevice, property_id: u32) -> Result<String, Box<dyn std::error::Error>> {
+fn read_property(
+    socket: &UdpSocket,
+    device: &RemoteDevice,
+    property_id: u32,
+) -> Result<String, Box<dyn std::error::Error>> {
     use std::sync::atomic::{AtomicU8, Ordering};
     static INVOKE_ID: AtomicU8 = AtomicU8::new(0);
-    
+
     let invoke_id = INVOKE_ID.fetch_add(1, Ordering::SeqCst);
     let invoke_id = if invoke_id == 0 { 1 } else { invoke_id }; // Never use 0
-    
+
     // Create ReadProperty request following the official BACnet C stack implementation
     // Reference: bacnet-stack/src/bacnet/rp.c
-    
+
     let mut apdu = Vec::new();
-    
+
     // APDU Header (4 bytes) - following rp_encode_apdu()
     apdu.push(0x00); // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
     apdu.push(0x05); // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
     apdu.push(invoke_id); // invoke_id
     apdu.push(0x0C); // SERVICE_CONFIRMED_READ_PROPERTY (12)
-    
+
     // ReadProperty Service Data - following read_property_request_encode()
-    
+
     // Context tag 0: Object Identifier (BACnetObjectIdentifier)
     // Encode as 4-byte object identifier: (object_type << 22) | instance
     let object_type = ObjectType::Device as u32; // 8
     let object_id = (object_type << 22) | (device.device_id & 0x3FFFFF);
     apdu.push(0x0C); // Context tag [0], length 4
     apdu.extend_from_slice(&object_id.to_be_bytes());
-    
+
     // Context tag 1: Property Identifier (BACnetPropertyIdentifier)
     // Encode as enumerated value
     if property_id <= 255 {
@@ -457,22 +516,26 @@ fn read_property(socket: &UdpSocket, device: &RemoteDevice, property_id: u32) ->
         apdu.push(0x1C); // Context tag [1], length 4
         apdu.extend_from_slice(&property_id.to_be_bytes());
     }
-    
+
     // Context tag 2: Property Array Index is OPTIONAL
     // We don't include it, meaning we want the entire property (BACNET_ARRAY_ALL)
-    
+
     // Debug: Print the request
-    if device.device_id == 1 {  // Only debug device 1
+    if device.device_id == 1 {
+        // Only debug device 1
         println!("    DEBUG: Invoke ID: {}", invoke_id);
-        println!("    DEBUG: Device ID: {}, Property ID: {}", device.device_id, property_id);
+        println!(
+            "    DEBUG: Device ID: {}, Property ID: {}",
+            device.device_id, property_id
+        );
         println!("    DEBUG: Object ID encoded: 0x{:08X}", object_id);
         println!("    DEBUG: Full APDU: {:02X?}", apdu);
     }
-    
+
     // Create NPDU with proper addressing for routed devices
     let mut npdu = Npdu::new();
     npdu.control.expecting_reply = true;
-    
+
     if device.network_number != 0 {
         npdu.control.destination_present = true;
         npdu.destination = Some(NetworkAddress {
@@ -481,21 +544,24 @@ fn read_property(socket: &UdpSocket, device: &RemoteDevice, property_id: u32) ->
         });
         npdu.hop_count = Some(255);
     }
-    
+
     let npdu_bytes = encode_npdu_with_data(&npdu, &apdu);
-    
+
     // Wrap in BVLC header for unicast
-    let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, 4 + npdu_bytes.len() as u16);
+    let header = BvlcHeader::new(
+        BvlcFunction::OriginalUnicastNpdu,
+        4 + npdu_bytes.len() as u16,
+    );
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
-    
+
     // Send to device address
     socket.send_to(&frame, device.socket_addr)?;
-    
+
     // Wait for response
     let start = Instant::now();
     let mut buffer = [0u8; 1500];
-    
+
     while start.elapsed() < Duration::from_secs(5) {
         match socket.recv_from(&mut buffer) {
             Ok((len, _src_addr)) => {
@@ -508,59 +574,82 @@ fn read_property(socket: &UdpSocket, device: &RemoteDevice, property_id: u32) ->
                             // Check PDU type
                             let pdu_type = (apdu_data[0] & 0xF0) >> 4;
                             let resp_invoke_id = apdu_data[0] & 0x0F;
-                            
+
                             if resp_invoke_id == (invoke_id & 0x0F) {
                                 match pdu_type {
-                                    0x3 => { // PDU_TYPE_COMPLEX_ACK
+                                    0x3 => {
+                                        // PDU_TYPE_COMPLEX_ACK
                                         // Complex ACK format: [PDU_TYPE+invoke_id] [service_choice] [service_data...]
-                                        if apdu_data.len() >= 2 && apdu_data[1] == 0x0C { // SERVICE_CONFIRMED_READ_PROPERTY
+                                        if apdu_data.len() >= 2 && apdu_data[1] == 0x0C {
+                                            // SERVICE_CONFIRMED_READ_PROPERTY
                                             // Parse ReadProperty-ACK service data starting at byte 2
-                                            if let Ok(response) = ReadPropertyResponse::decode(&apdu_data[2..]) {
-                                                return extract_string_value(&response.property_value);
+                                            if let Ok(response) =
+                                                ReadPropertyResponse::decode(&apdu_data[2..])
+                                            {
+                                                return extract_string_value(
+                                                    &response.property_value,
+                                                );
                                             } else {
                                                 // Try manual parsing if decode fails
-                                                return parse_read_property_ack_manual(&apdu_data[2..]);
+                                                return parse_read_property_ack_manual(
+                                                    &apdu_data[2..],
+                                                );
                                             }
                                         }
                                     }
-                                    0x5 => { // Simple ACK
-                                        return Err("Received Simple ACK instead of Complex ACK".into());
+                                    0x5 => {
+                                        // Simple ACK
+                                        return Err(
+                                            "Received Simple ACK instead of Complex ACK".into()
+                                        );
                                     }
-                                    0x6 => { // Error
+                                    0x6 => {
+                                        // Error
                                         if apdu_data.len() >= 5 {
                                             let _error_choice = apdu_data[1];
                                             let error_class = apdu_data[2] & 0x3F; // Lower 6 bits
                                             let error_code = apdu_data[3];
-                                            
+
                                             let error_class_str = match error_class {
                                                 0 => "device",
-                                                1 => "object", 
+                                                1 => "object",
                                                 2 => "property",
                                                 3 => "resources",
                                                 4 => "security",
                                                 5 => "services",
                                                 6 => "vt",
                                                 7 => "communication",
-                                                _ => "unknown"
+                                                _ => "unknown",
                                             };
-                                            
+
                                             let error_code_str = match (error_class, error_code) {
                                                 (2, 0) => "unknown-property",
                                                 (2, 1) => "property-not-array",
                                                 (2, 2) => "not-settable",
                                                 (2, 3) => "invalid-array-index",
-                                                _ => "unknown"
+                                                _ => "unknown",
                                             };
-                                            
-                                            return Err(format!("BACnet Error - Class: {} ({}), Code: {} ({})", 
-                                                             error_class, error_class_str, error_code, error_code_str).into());
+
+                                            return Err(format!(
+                                                "BACnet Error - Class: {} ({}), Code: {} ({})",
+                                                error_class,
+                                                error_class_str,
+                                                error_code,
+                                                error_code_str
+                                            )
+                                            .into());
                                         }
                                         return Err("BACnet Error (malformed)".into());
                                     }
-                                    0x7 => { // Reject
+                                    0x7 => {
+                                        // Reject
                                         if apdu_data.len() >= 2 {
                                             let reject_reason = apdu_data[1];
-                                            return Err(format!("BACnet Reject - Reason: {}", reject_reason).into());
+                                            return Err(format!(
+                                                "BACnet Reject - Reason: {}",
+                                                reject_reason
+                                            )
+                                            .into());
                                         }
                                         return Err("BACnet Reject".into());
                                     }
@@ -574,7 +663,7 @@ fn read_property(socket: &UdpSocket, device: &RemoteDevice, property_id: u32) ->
             Err(_) => continue,
         }
     }
-    
+
     Err("No response received".into())
 }
 
@@ -582,7 +671,7 @@ fn extract_string_value(data: &[u8]) -> Result<String, Box<dyn std::error::Error
     if data.is_empty() {
         return Ok("(empty)".to_string());
     }
-    
+
     // Simple tag decoding - look for character string tag (0x74)
     if data[0] == 0x74 || data[0] == 0x75 {
         // Character string
@@ -592,13 +681,13 @@ fn extract_string_value(data: &[u8]) -> Result<String, Box<dyn std::error::Error
             // Extended length
             ((data[1] as usize) << 8) | (data[2] as usize)
         };
-        
+
         let start = if data[0] == 0x74 { 2 } else { 3 };
         if data.len() >= start + len {
             return Ok(String::from_utf8_lossy(&data[start..start + len]).to_string());
         }
     }
-    
+
     // Try unsigned integer
     if (data[0] & 0xF0) == 0x20 {
         let len = (data[0] & 0x07) as usize;
@@ -610,9 +699,13 @@ fn extract_string_value(data: &[u8]) -> Result<String, Box<dyn std::error::Error
             return Ok(value.to_string());
         }
     }
-    
+
     // Fallback to hex representation
-    let hex_str = data.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join("");
+    let hex_str = data
+        .iter()
+        .map(|b| format!("{:02X}", b))
+        .collect::<Vec<_>>()
+        .join("");
     Ok(format!("0x{}", hex_str))
 }
 
@@ -628,16 +721,16 @@ fn parse_read_property_ack_manual(data: &[u8]) -> Result<String, Box<dyn std::er
     if data.len() < 6 {
         return Err("ReadProperty-ACK too short".into());
     }
-    
+
     let mut pos = 0;
-    
+
     // Skip object identifier (context tag 0) - we already know what we asked for
     if data[pos] == 0x0C && pos + 5 < data.len() {
         pos += 5; // Context tag + 4 bytes object ID
     } else {
         return Err("Invalid object identifier in ReadProperty-ACK".into());
     }
-    
+
     // Skip property identifier (context tag 1)
     if data[pos] == 0x19 && pos + 2 < data.len() {
         pos += 2; // Context tag + 1 byte property ID
@@ -646,29 +739,31 @@ fn parse_read_property_ack_manual(data: &[u8]) -> Result<String, Box<dyn std::er
     } else {
         return Err("Invalid property identifier in ReadProperty-ACK".into());
     }
-    
+
     // Skip optional property array index (context tag 2) if present
     if pos < data.len() && (data[pos] & 0xF8) == 0x20 {
         let len = (data[pos] & 0x07) as usize;
         pos += 1 + len;
     }
-    
+
     // Property value is in context tag 3 (opening/closing tags)
-    if pos < data.len() && data[pos] == 0x3E { // Opening tag [3]
+    if pos < data.len() && data[pos] == 0x3E {
+        // Opening tag [3]
         pos += 1;
-        
+
         // Find closing tag
         let value_start = pos;
         let mut value_end = pos;
-        while value_end < data.len() && data[value_end] != 0x3F { // Closing tag [3]
+        while value_end < data.len() && data[value_end] != 0x3F {
+            // Closing tag [3]
             value_end += 1;
         }
-        
+
         if value_end < data.len() {
             return extract_string_value(&data[value_start..value_end]);
         }
     }
-    
+
     Err("Could not parse property value".into())
 }
 
@@ -680,7 +775,10 @@ struct BACnetObjectId {
 }
 
 // Read the Object-List property to get all objects in the device
-fn read_object_list(socket: &UdpSocket, device: &RemoteDevice) -> Result<Vec<BACnetObjectId>, Box<dyn std::error::Error>> {
+fn read_object_list(
+    socket: &UdpSocket,
+    device: &RemoteDevice,
+) -> Result<Vec<BACnetObjectId>, Box<dyn std::error::Error>> {
     // Read Object-List property (property ID 76)
     match read_property(socket, device, PropertyIdentifier::ObjectList as u32) {
         Ok(raw_data) => {
@@ -696,18 +794,27 @@ fn read_object_list(socket: &UdpSocket, device: &RemoteDevice) -> Result<Vec<BAC
 }
 
 // Read Object-List using array indices (more reliable for large lists)
-fn read_object_list_with_indices(socket: &UdpSocket, device: &RemoteDevice) -> Result<Vec<BACnetObjectId>, Box<dyn std::error::Error>> {
+fn read_object_list_with_indices(
+    socket: &UdpSocket,
+    device: &RemoteDevice,
+) -> Result<Vec<BACnetObjectId>, Box<dyn std::error::Error>> {
     let mut objects = Vec::new();
-    
+
     // First try to read index 0 to get the array length
     match read_property_with_array_index(socket, device, PropertyIdentifier::ObjectList as u32, 0) {
         Ok(length_str) => {
             if let Ok(length) = length_str.parse::<u32>() {
                 println!("    Object-List has {} objects", length);
-                
+
                 // Read each object identifier
-                for i in 1..=std::cmp::min(length, 50) { // Limit to first 50 objects
-                    match read_property_with_array_index(socket, device, PropertyIdentifier::ObjectList as u32, i) {
+                for i in 1..=std::cmp::min(length, 50) {
+                    // Limit to first 50 objects
+                    match read_property_with_array_index(
+                        socket,
+                        device,
+                        PropertyIdentifier::ObjectList as u32,
+                        i,
+                    ) {
                         Ok(obj_data) => {
                             if let Ok(obj_id) = parse_object_identifier(&obj_data) {
                                 objects.push(obj_id);
@@ -721,8 +828,14 @@ fn read_object_list_with_indices(socket: &UdpSocket, device: &RemoteDevice) -> R
         }
         Err(_) => {
             // Fallback: try reading individual indices until we get errors
-            for i in 1..=20 { // Try first 20 objects
-                match read_property_with_array_index(socket, device, PropertyIdentifier::ObjectList as u32, i) {
+            for i in 1..=20 {
+                // Try first 20 objects
+                match read_property_with_array_index(
+                    socket,
+                    device,
+                    PropertyIdentifier::ObjectList as u32,
+                    i,
+                ) {
                     Ok(obj_data) => {
                         if let Ok(obj_id) = parse_object_identifier(&obj_data) {
                             objects.push(obj_id);
@@ -734,33 +847,38 @@ fn read_object_list_with_indices(socket: &UdpSocket, device: &RemoteDevice) -> R
             }
         }
     }
-    
+
     Ok(objects)
 }
 
 // Read a property from a specific object
-fn read_object_property(socket: &UdpSocket, device: &RemoteDevice, object_id: &BACnetObjectId, property_id: u32) -> Result<String, Box<dyn std::error::Error>> {
+fn read_object_property(
+    socket: &UdpSocket,
+    device: &RemoteDevice,
+    object_id: &BACnetObjectId,
+    property_id: u32,
+) -> Result<String, Box<dyn std::error::Error>> {
     use std::sync::atomic::{AtomicU8, Ordering};
     static INVOKE_ID: AtomicU8 = AtomicU8::new(100); // Different counter for object properties
-    
+
     let invoke_id = INVOKE_ID.fetch_add(1, Ordering::SeqCst);
     let invoke_id = if invoke_id == 0 { 101 } else { invoke_id };
-    
+
     let mut apdu = Vec::new();
-    
+
     // APDU Header (4 bytes)
     apdu.push(0x00); // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
     apdu.push(0x05); // encode_max_segs_max_apdu(0, MAX_APDU)
     apdu.push(invoke_id); // invoke_id
     apdu.push(0x0C); // SERVICE_CONFIRMED_READ_PROPERTY
-    
+
     // ReadProperty Service Data
     // Context tag 0: Object Identifier
     let object_type = object_id.object_type as u32;
     let obj_id = (object_type << 22) | (object_id.instance & 0x3FFFFF);
     apdu.push(0x0C); // Context tag [0], length 4
     apdu.extend_from_slice(&obj_id.to_be_bytes());
-    
+
     // Context tag 1: Property Identifier
     if property_id <= 255 {
         apdu.push(0x19); // Context tag [1], length 1
@@ -772,11 +890,11 @@ fn read_object_property(socket: &UdpSocket, device: &RemoteDevice, object_id: &B
         apdu.push(0x1C); // Context tag [1], length 4
         apdu.extend_from_slice(&property_id.to_be_bytes());
     }
-    
+
     // Send the request and wait for response (similar to read_property function)
     let mut npdu = Npdu::new();
     npdu.control.expecting_reply = true;
-    
+
     if device.network_number != 0 {
         npdu.control.destination_present = true;
         npdu.destination = Some(NetworkAddress {
@@ -785,19 +903,22 @@ fn read_object_property(socket: &UdpSocket, device: &RemoteDevice, object_id: &B
         });
         npdu.hop_count = Some(255);
     }
-    
+
     let npdu_bytes = encode_npdu_with_data(&npdu, &apdu);
-    
-    let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, 4 + npdu_bytes.len() as u16);
+
+    let header = BvlcHeader::new(
+        BvlcFunction::OriginalUnicastNpdu,
+        4 + npdu_bytes.len() as u16,
+    );
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
-    
+
     socket.send_to(&frame, device.socket_addr)?;
-    
+
     // Wait for response (simplified version)
     let start = Instant::now();
     let mut buffer = [0u8; 1500];
-    
+
     while start.elapsed() < Duration::from_secs(3) {
         match socket.recv_from(&mut buffer) {
             Ok((len, _src_addr)) => {
@@ -808,10 +929,12 @@ fn read_object_property(socket: &UdpSocket, device: &RemoteDevice, object_id: &B
                             let apdu_data = &npdu_data[offset..];
                             let pdu_type = (apdu_data[0] & 0xF0) >> 4;
                             let resp_invoke_id = apdu_data[0] & 0x0F;
-                            
+
                             if resp_invoke_id == (invoke_id & 0x0F) && pdu_type == 0x3 {
                                 if apdu_data.len() >= 2 && apdu_data[1] == 0x0C {
-                                    if let Ok(response) = ReadPropertyResponse::decode(&apdu_data[2..]) {
+                                    if let Ok(response) =
+                                        ReadPropertyResponse::decode(&apdu_data[2..])
+                                    {
                                         return extract_string_value(&response.property_value);
                                     } else {
                                         return parse_read_property_ack_manual(&apdu_data[2..]);
@@ -825,33 +948,38 @@ fn read_object_property(socket: &UdpSocket, device: &RemoteDevice, object_id: &B
             Err(_) => continue,
         }
     }
-    
+
     Err("No response received".into())
 }
 
 // Read a property with array index
-fn read_property_with_array_index(socket: &UdpSocket, device: &RemoteDevice, property_id: u32, array_index: u32) -> Result<String, Box<dyn std::error::Error>> {
+fn read_property_with_array_index(
+    socket: &UdpSocket,
+    device: &RemoteDevice,
+    property_id: u32,
+    array_index: u32,
+) -> Result<String, Box<dyn std::error::Error>> {
     use std::sync::atomic::{AtomicU8, Ordering};
     static INVOKE_ID: AtomicU8 = AtomicU8::new(200); // Different counter for array properties
-    
+
     let invoke_id = INVOKE_ID.fetch_add(1, Ordering::SeqCst);
     let invoke_id = if invoke_id == 0 { 201 } else { invoke_id };
-    
+
     let mut apdu = Vec::new();
-    
+
     // APDU Header (4 bytes)
     apdu.push(0x00); // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
     apdu.push(0x05); // encode_max_segs_max_apdu(0, MAX_APDU)
     apdu.push(invoke_id); // invoke_id
     apdu.push(0x0C); // SERVICE_CONFIRMED_READ_PROPERTY
-    
+
     // ReadProperty Service Data
     // Context tag 0: Object Identifier (Device)
     let object_type = ObjectType::Device as u32;
     let obj_id = (object_type << 22) | (device.device_id & 0x3FFFFF);
     apdu.push(0x0C); // Context tag [0], length 4
     apdu.extend_from_slice(&obj_id.to_be_bytes());
-    
+
     // Context tag 1: Property Identifier
     if property_id <= 255 {
         apdu.push(0x19); // Context tag [1], length 1
@@ -860,7 +988,7 @@ fn read_property_with_array_index(socket: &UdpSocket, device: &RemoteDevice, pro
         apdu.push(0x1A); // Context tag [1], length 2
         apdu.extend_from_slice(&(property_id as u16).to_be_bytes());
     }
-    
+
     // Context tag 2: Property Array Index
     if array_index <= 255 {
         apdu.push(0x29); // Context tag [2], length 1
@@ -869,11 +997,11 @@ fn read_property_with_array_index(socket: &UdpSocket, device: &RemoteDevice, pro
         apdu.push(0x2A); // Context tag [2], length 2
         apdu.extend_from_slice(&(array_index as u16).to_be_bytes());
     }
-    
+
     // Send and receive (similar to other functions)
     let mut npdu = Npdu::new();
     npdu.control.expecting_reply = true;
-    
+
     if device.network_number != 0 {
         npdu.control.destination_present = true;
         npdu.destination = Some(NetworkAddress {
@@ -882,17 +1010,20 @@ fn read_property_with_array_index(socket: &UdpSocket, device: &RemoteDevice, pro
         });
         npdu.hop_count = Some(255);
     }
-    
+
     let npdu_bytes = encode_npdu_with_data(&npdu, &apdu);
-    let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, 4 + npdu_bytes.len() as u16);
+    let header = BvlcHeader::new(
+        BvlcFunction::OriginalUnicastNpdu,
+        4 + npdu_bytes.len() as u16,
+    );
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
-    
+
     socket.send_to(&frame, device.socket_addr)?;
-    
+
     let start = Instant::now();
     let mut buffer = [0u8; 1500];
-    
+
     while start.elapsed() < Duration::from_secs(3) {
         match socket.recv_from(&mut buffer) {
             Ok((len, _src_addr)) => {
@@ -903,10 +1034,12 @@ fn read_property_with_array_index(socket: &UdpSocket, device: &RemoteDevice, pro
                             let apdu_data = &npdu_data[offset..];
                             let pdu_type = (apdu_data[0] & 0xF0) >> 4;
                             let resp_invoke_id = apdu_data[0] & 0x0F;
-                            
+
                             if resp_invoke_id == (invoke_id & 0x0F) && pdu_type == 0x3 {
                                 if apdu_data.len() >= 2 && apdu_data[1] == 0x0C {
-                                    if let Ok(response) = ReadPropertyResponse::decode(&apdu_data[2..]) {
+                                    if let Ok(response) =
+                                        ReadPropertyResponse::decode(&apdu_data[2..])
+                                    {
                                         return extract_string_value(&response.property_value);
                                     } else {
                                         return parse_read_property_ack_manual(&apdu_data[2..]);
@@ -920,7 +1053,7 @@ fn read_property_with_array_index(socket: &UdpSocket, device: &RemoteDevice, pro
             Err(_) => continue,
         }
     }
-    
+
     Err("No response received".into())
 }
 
@@ -932,17 +1065,17 @@ fn parse_object_identifier(data: &str) -> Result<BACnetObjectId, Box<dyn std::er
         if let Ok(obj_id_value) = u32::from_str_radix(&data[2..], 16) {
             let object_type_num = (obj_id_value >> 22) & 0x3FF; // Upper 10 bits
             let instance = obj_id_value & 0x3FFFFF; // Lower 22 bits
-            
-            let object_type = ObjectType::try_from(object_type_num as u16)
-                .unwrap_or(ObjectType::Device);
-            
+
+            let object_type =
+                ObjectType::try_from(object_type_num as u16).unwrap_or(ObjectType::Device);
+
             return Ok(BACnetObjectId {
                 object_type,
                 instance,
             });
         }
     }
-    
+
     // If we can't parse it, return an error
     Err(format!("Could not parse object identifier: {}", data).into())
 }
@@ -951,7 +1084,7 @@ fn parse_object_identifier(data: &str) -> Result<BACnetObjectId, Box<dyn std::er
 fn object_type_name(obj_type: ObjectType) -> &'static str {
     match obj_type {
         ObjectType::AnalogInput => "Analog Input",
-        ObjectType::AnalogOutput => "Analog Output", 
+        ObjectType::AnalogOutput => "Analog Output",
         ObjectType::AnalogValue => "Analog Value",
         ObjectType::BinaryInput => "Binary Input",
         ObjectType::BinaryOutput => "Binary Output",
@@ -969,9 +1102,16 @@ fn object_type_name(obj_type: ObjectType) -> &'static str {
 
 // Check if object type typically has Present Value
 fn is_io_object(obj_type: ObjectType) -> bool {
-    matches!(obj_type, 
-        ObjectType::AnalogInput | ObjectType::AnalogOutput | ObjectType::AnalogValue |
-        ObjectType::BinaryInput | ObjectType::BinaryOutput | ObjectType::BinaryValue |
-        ObjectType::MultiStateInput | ObjectType::MultiStateOutput | ObjectType::MultiStateValue
+    matches!(
+        obj_type,
+        ObjectType::AnalogInput
+            | ObjectType::AnalogOutput
+            | ObjectType::AnalogValue
+            | ObjectType::BinaryInput
+            | ObjectType::BinaryOutput
+            | ObjectType::BinaryValue
+            | ObjectType::MultiStateInput
+            | ObjectType::MultiStateOutput
+            | ObjectType::MultiStateValue
     )
 }
