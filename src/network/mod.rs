@@ -114,6 +114,31 @@ pub enum NetworkMessageType {
     NetworkNumberIs = 0x13,
 }
 
+impl TryFrom<u8> for NetworkMessageType {
+    type Error = NetworkError;
+
+    fn try_from(value: u8) -> Result<Self> {
+        match value {
+            0x00 => Ok(NetworkMessageType::WhoIsRouterToNetwork),
+            0x01 => Ok(NetworkMessageType::IAmRouterToNetwork),
+            0x02 => Ok(NetworkMessageType::ICouldBeRouterToNetwork),
+            0x03 => Ok(NetworkMessageType::RejectMessageToNetwork),
+            0x04 => Ok(NetworkMessageType::RouterBusyToNetwork),
+            0x05 => Ok(NetworkMessageType::RouterAvailableToNetwork),
+            0x06 => Ok(NetworkMessageType::InitializeRoutingTable),
+            0x07 => Ok(NetworkMessageType::InitializeRoutingTableAck),
+            0x08 => Ok(NetworkMessageType::EstablishConnectionToNetwork),
+            0x09 => Ok(NetworkMessageType::DisconnectConnectionToNetwork),
+            0x12 => Ok(NetworkMessageType::WhatIsNetworkNumber),
+            0x13 => Ok(NetworkMessageType::NetworkNumberIs),
+            _ => Err(NetworkError::InvalidNpdu(format!(
+                "Unknown network message type: {}",
+                value
+            ))),
+        }
+    }
+}
+
 /// NPDU control flags
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NpduControl {
@@ -422,26 +447,7 @@ impl NetworkLayerMessage {
             ));
         }
 
-        let message_type = match data[0] {
-            0x00 => NetworkMessageType::WhoIsRouterToNetwork,
-            0x01 => NetworkMessageType::IAmRouterToNetwork,
-            0x02 => NetworkMessageType::ICouldBeRouterToNetwork,
-            0x03 => NetworkMessageType::RejectMessageToNetwork,
-            0x04 => NetworkMessageType::RouterBusyToNetwork,
-            0x05 => NetworkMessageType::RouterAvailableToNetwork,
-            0x06 => NetworkMessageType::InitializeRoutingTable,
-            0x07 => NetworkMessageType::InitializeRoutingTableAck,
-            0x08 => NetworkMessageType::EstablishConnectionToNetwork,
-            0x09 => NetworkMessageType::DisconnectConnectionToNetwork,
-            0x12 => NetworkMessageType::WhatIsNetworkNumber,
-            0x13 => NetworkMessageType::NetworkNumberIs,
-            _ => {
-                return Err(NetworkError::InvalidNpdu(format!(
-                    "Unknown network message type: {}",
-                    data[0]
-                )))
-            }
-        };
+        let message_type = data[0].try_into()?;
 
         let message_data = if data.len() > 1 {
             data[1..].to_vec()
