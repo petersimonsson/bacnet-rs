@@ -4,11 +4,10 @@
 //! performance monitoring, statistics collection, and other helpers.
 
 use bacnet_rs::util::{
-    self,
+    self, calculate_throughput, format_bytes,
     performance::{PerformanceMonitor, ScopedTimer},
-    statistics::{CommunicationStats, StatsCollector, DeviceStats},
+    statistics::{CommunicationStats, DeviceStats, StatsCollector},
     CircularBuffer, RetryConfig,
-    format_bytes, calculate_throughput,
 };
 use std::{
     thread,
@@ -66,7 +65,7 @@ fn demo_performance_monitoring() -> Result<(), Box<dyn std::error::Error>> {
     // Display performance metrics
     println!("\nPerformance Metrics:");
     println!("-------------------");
-    
+
     for metric in monitor.get_all_metrics() {
         println!("  {} ({} calls):", metric.name, metric.count);
         println!("    Average: {:.2} ms", metric.avg_duration_ms);
@@ -108,7 +107,8 @@ fn demo_statistics_collection() -> Result<(), Box<dyn std::error::Error>> {
             });
 
             // Simulate response
-            if i % 3 != 2 { // 2/3 success rate
+            if i % 3 != 2 {
+                // 2/3 success rate
                 let response_time = 20.0 + (i as f64) * 2.5;
                 collector.update_device_stats(*device_id, |stats| {
                     stats.comm_stats.record_received(150);
@@ -135,8 +135,16 @@ fn demo_statistics_collection() -> Result<(), Box<dyn std::error::Error>> {
     let global_stats = collector.get_global_stats();
     println!("  Messages sent: {}", global_stats.messages_sent);
     println!("  Messages received: {}", global_stats.messages_received);
-    println!("  Bytes sent: {} ({})", global_stats.bytes_sent, format_bytes(global_stats.bytes_sent));
-    println!("  Bytes received: {} ({})", global_stats.bytes_received, format_bytes(global_stats.bytes_received));
+    println!(
+        "  Bytes sent: {} ({})",
+        global_stats.bytes_sent,
+        format_bytes(global_stats.bytes_sent)
+    );
+    println!(
+        "  Bytes received: {} ({})",
+        global_stats.bytes_received,
+        format_bytes(global_stats.bytes_received)
+    );
     println!("  Timeouts: {}", global_stats.timeouts);
     println!("  Success rate: {:.1}%", global_stats.success_rate());
 
@@ -144,14 +152,17 @@ fn demo_statistics_collection() -> Result<(), Box<dyn std::error::Error>> {
     println!("-----------------");
     for device in collector.get_all_device_stats() {
         println!("  Device {} ({}):", device.device_id, device.address);
-        println!("    Status: {}", if device.online { "Online" } else { "Offline" });
+        println!(
+            "    Status: {}",
+            if device.online { "Online" } else { "Offline" }
+        );
         println!("    Success rate: {:.1}%", device.comm_stats.success_rate());
         if let Some(avg_response) = device.avg_response_time() {
             println!("    Avg response time: {:.2} ms", avg_response);
         }
-        println!("    Messages: {} sent, {} received", 
-            device.comm_stats.messages_sent, 
-            device.comm_stats.messages_received
+        println!(
+            "    Messages: {} sent, {} received",
+            device.comm_stats.messages_sent, device.comm_stats.messages_received
         );
     }
 
@@ -177,7 +188,10 @@ fn demo_utility_functions() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(obj_id) = util::encode_object_id(obj_type, instance) {
         println!("  Encoded object ID: 0x{:08X}", obj_id);
         let (decoded_type, decoded_instance) = util::decode_object_id(obj_id);
-        println!("  Decoded: type={}, instance={}", decoded_type, decoded_instance);
+        println!(
+            "  Decoded: type={}, instance={}",
+            decoded_type, decoded_instance
+        );
     }
 
     // Address parsing
@@ -196,14 +210,21 @@ fn demo_utility_functions() -> Result<(), Box<dyn std::error::Error>> {
     // Throughput calculation
     let bytes = 1_000_000u64;
     let duration = 2.5;
-    println!("\n  Throughput: {} bytes in {} seconds = {}", 
-        bytes, duration, calculate_throughput(bytes, duration));
+    println!(
+        "\n  Throughput: {} bytes in {} seconds = {}",
+        bytes,
+        duration,
+        calculate_throughput(bytes, duration)
+    );
 
     // CRC calculations
     let data = b"Hello BACnet";
     let crc16 = util::crc16_mstp(data);
     let crc32 = util::crc32c(data);
-    println!("\n  CRC calculations for '{}':", String::from_utf8_lossy(data));
+    println!(
+        "\n  CRC calculations for '{}':",
+        String::from_utf8_lossy(data)
+    );
     println!("    CRC-16 (MS/TP): 0x{:04X}", crc16);
     println!("    CRC-32C: 0x{:08X}", crc32);
 
@@ -261,7 +282,10 @@ fn demo_retry_config() -> Result<(), Box<dyn std::error::Error>> {
     println!("    Max attempts: {}", retry_config.max_attempts);
     println!("    Initial delay: {} ms", retry_config.initial_delay_ms);
     println!("    Max delay: {} ms", retry_config.max_delay_ms);
-    println!("    Backoff multiplier: {}", retry_config.backoff_multiplier);
+    println!(
+        "    Backoff multiplier: {}",
+        retry_config.backoff_multiplier
+    );
 
     println!("\n  Delay progression:");
     for attempt in 0..retry_config.max_attempts {
@@ -272,16 +296,20 @@ fn demo_retry_config() -> Result<(), Box<dyn std::error::Error>> {
     // Simulate retry with backoff
     println!("\n  Simulating retry with exponential backoff:");
     let start = Instant::now();
-    
+
     for attempt in 0..3 {
-        println!("    Attempt {} at {:.1}s", 
-            attempt + 1, 
+        println!(
+            "    Attempt {} at {:.1}s",
+            attempt + 1,
             start.elapsed().as_secs_f64()
         );
-        
+
         if attempt < 2 {
             let delay = retry_config.delay_for_attempt(attempt);
-            println!("    Failed, waiting {} ms before retry...", delay.as_millis());
+            println!(
+                "    Failed, waiting {} ms before retry...",
+                delay.as_millis()
+            );
             thread::sleep(delay);
         } else {
             println!("    Success!");

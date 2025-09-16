@@ -94,7 +94,7 @@
 //! db.add_object(obj_id).expect("Failed to add object");
 //!
 //! // Set properties
-//! db.set_property(obj_id, PropertyIdentifier::ObjectName, 
+//! db.set_property(obj_id, PropertyIdentifier::ObjectName,
 //!     PropertyValue::CharacterString("Room Temperature".to_string()))
 //!     .expect("Failed to set property");
 //!
@@ -111,7 +111,6 @@
 //! - Complete property identifier enumeration
 //! - Proper object identifier encoding/decoding
 //! - Thread-safe object database implementation
-
 
 #[cfg(feature = "std")]
 use std::error::Error;
@@ -246,7 +245,10 @@ impl TryFrom<u16> for ObjectType {
             28 => Ok(ObjectType::LoadControl),
             29 => Ok(ObjectType::StructuredView),
             30 => Ok(ObjectType::AccessDoor),
-            _ => Err(ObjectError::InvalidValue(format!("Unknown object type: {}", value))),
+            _ => Err(ObjectError::InvalidValue(format!(
+                "Unknown object type: {}",
+                value
+            ))),
         }
     }
 }
@@ -478,8 +480,8 @@ impl Device {
 
     /// Check if the current vendor ID is officially assigned
     pub fn is_vendor_id_official(&self) -> bool {
-        crate::vendor::is_vendor_id_assigned(self.vendor_identifier) && 
-        !crate::vendor::is_vendor_id_reserved(self.vendor_identifier)
+        crate::vendor::is_vendor_id_assigned(self.vendor_identifier)
+            && !crate::vendor::is_vendor_id_reserved(self.vendor_identifier)
     }
 
     /// Check if the current vendor ID is reserved for testing
@@ -515,30 +517,30 @@ impl BacnetObject for Device {
             PropertyIdentifier::VendorName => {
                 Ok(PropertyValue::CharacterString(self.vendor_name.clone()))
             }
-            PropertyIdentifier::VendorIdentifier => {
-                Ok(PropertyValue::UnsignedInteger(self.vendor_identifier as u32))
-            }
+            PropertyIdentifier::VendorIdentifier => Ok(PropertyValue::UnsignedInteger(
+                self.vendor_identifier as u32,
+            )),
             PropertyIdentifier::ModelName => {
                 Ok(PropertyValue::CharacterString(self.model_name.clone()))
             }
-            PropertyIdentifier::FirmwareRevision => {
-                Ok(PropertyValue::CharacterString(self.firmware_revision.clone()))
-            }
-            PropertyIdentifier::ApplicationSoftwareVersion => {
-                Ok(PropertyValue::CharacterString(self.application_software_version.clone()))
-            }
+            PropertyIdentifier::FirmwareRevision => Ok(PropertyValue::CharacterString(
+                self.firmware_revision.clone(),
+            )),
+            PropertyIdentifier::ApplicationSoftwareVersion => Ok(PropertyValue::CharacterString(
+                self.application_software_version.clone(),
+            )),
             PropertyIdentifier::ProtocolVersion => {
                 Ok(PropertyValue::UnsignedInteger(self.protocol_version as u32))
             }
-            PropertyIdentifier::ProtocolRevision => {
-                Ok(PropertyValue::UnsignedInteger(self.protocol_revision as u32))
-            }
-            PropertyIdentifier::MaxApduLengthAccepted => {
-                Ok(PropertyValue::UnsignedInteger(self.max_apdu_length_accepted as u32))
-            }
-            PropertyIdentifier::SegmentationSupported => {
-                Ok(PropertyValue::Enumerated(self.segmentation_supported as u32))
-            }
+            PropertyIdentifier::ProtocolRevision => Ok(PropertyValue::UnsignedInteger(
+                self.protocol_revision as u32,
+            )),
+            PropertyIdentifier::MaxApduLengthAccepted => Ok(PropertyValue::UnsignedInteger(
+                self.max_apdu_length_accepted as u32,
+            )),
+            PropertyIdentifier::SegmentationSupported => Ok(PropertyValue::Enumerated(
+                self.segmentation_supported as u32,
+            )),
             PropertyIdentifier::DatabaseRevision => {
                 Ok(PropertyValue::UnsignedInteger(self.database_revision))
             }
@@ -655,15 +657,9 @@ pub enum Segmentation {
 }
 
 /// Protocol services supported bitfield
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ProtocolServicesSupported {
     pub bits: [u8; 5], // 40 bits for all BACnet services
-}
-
-impl Default for ProtocolServicesSupported {
-    fn default() -> Self {
-        Self { bits: [0; 5] }
-    }
 }
 
 impl ProtocolServicesSupported {
@@ -703,21 +699,23 @@ pub struct AddressBinding {
 pub mod analog;
 /// Binary object types (BI, BO, BV)
 pub mod binary;
-/// Multi-state object types (MSI, MSO, MSV)
-pub mod multistate;
-/// File object type
-pub mod file;
 /// Object database for managing BACnet objects
 #[cfg(feature = "std")]
 pub mod database;
+/// File object type
+pub mod file;
+/// Multi-state object types (MSI, MSO, MSV)
+pub mod multistate;
 
-pub use analog::{AnalogInput, AnalogOutput, AnalogValue, EventState, Reliability, EngineeringUnits};
-pub use binary::{BinaryInput, BinaryOutput, BinaryValue, BinaryPV, Polarity};
-pub use multistate::{MultiStateInput, MultiStateOutput, MultiStateValue};
+pub use analog::{
+    AnalogInput, AnalogOutput, AnalogValue, EngineeringUnits, EventState, Reliability,
+};
+pub use binary::{BinaryInput, BinaryOutput, BinaryPV, BinaryValue, Polarity};
 pub use file::{File, FileAccessMethod};
+pub use multistate::{MultiStateInput, MultiStateOutput, MultiStateValue};
 
 #[cfg(feature = "std")]
-pub use database::{ObjectDatabase, DatabaseBuilder, DatabaseStatistics};
+pub use database::{DatabaseBuilder, DatabaseStatistics, ObjectDatabase};
 
 #[cfg(test)]
 mod tests {
@@ -734,7 +732,7 @@ mod tests {
     #[test]
     fn test_device_properties() {
         let mut device = Device::new(456, "Property Test".to_string());
-        
+
         // Test getting properties
         let name = device.get_property(PropertyIdentifier::ObjectName).unwrap();
         if let PropertyValue::CharacterString(n) = name {
@@ -750,7 +748,7 @@ mod tests {
                 PropertyValue::CharacterString("New Name".to_string()),
             )
             .unwrap();
-        
+
         let name = device.get_property(PropertyIdentifier::ObjectName).unwrap();
         if let PropertyValue::CharacterString(n) = name {
             assert_eq!(n, "New Name");
@@ -762,12 +760,12 @@ mod tests {
     #[test]
     fn test_protocol_services_supported() {
         let mut services = ProtocolServicesSupported::default();
-        
+
         // Set some services as supported
         services.set_service(0, true); // Acknowledge-Alarm
         services.set_service(12, true); // Read-Property
         services.set_service(15, true); // Write-Property
-        
+
         assert!(services.is_service_supported(0));
         assert!(services.is_service_supported(12));
         assert!(services.is_service_supported(15));

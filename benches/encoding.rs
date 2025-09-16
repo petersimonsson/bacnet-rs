@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use bacnet_rs::encoding::*;
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn encode_benchmark(c: &mut Criterion) {
     c.bench_function("encode_application_tag", |b| {

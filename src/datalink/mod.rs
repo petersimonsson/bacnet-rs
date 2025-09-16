@@ -166,27 +166,27 @@ pub enum DataLinkError {
     /// such as socket errors, timeouts, or connection failures.
     #[cfg(feature = "std")]
     IoError(std::io::Error),
-    
+
     /// Invalid frame format detected.
     ///
     /// This error indicates that a received frame does not conform to the expected
     /// format for the data link type, such as invalid headers, incorrect frame
     /// structure, or protocol violations.
     InvalidFrame,
-    
+
     /// CRC check failed during frame validation.
     ///
     /// This error occurs when the calculated CRC/checksum does not match the
     /// expected value, indicating data corruption during transmission.
     CrcError,
-    
+
     /// Address resolution or validation failed.
     ///
     /// This error includes various address-related issues such as invalid address
     /// formats, unreachable destinations, or address conflicts. The string provides
     /// additional context about the specific issue.
     AddressError(String),
-    
+
     /// Unsupported data link type for the requested operation.
     ///
     /// This error occurs when attempting to use a data link type that is not
@@ -237,28 +237,28 @@ pub enum DataLinkType {
     /// common data link type in modern BACnet installations, providing good
     /// performance and easy integration with existing IP networks.
     BacnetIp,
-    
+
     /// BACnet/Ethernet (ISO 8802-3).
     ///
     /// Direct Ethernet frame communication using Ethernet type 0x82DC. Provides
     /// high performance on local networks but requires Ethernet infrastructure
     /// and may need special permissions for raw socket access.
     Ethernet,
-    
+
     /// MS/TP (Master-Slave/Token-Passing).
     ///
     /// Serial communication over RS-485, using a token-passing protocol for
     /// media access control. Common in field-level devices due to low cost
     /// and long cable runs. Supports data rates from 9600 to 115200 bps.
     MsTP,
-    
+
     /// PTP (Point-to-Point).
     ///
     /// Direct serial connection between two devices, typically used for device
     /// configuration, testing, or isolated connections. Simpler than MS/TP as
     /// it doesn't require token passing.
     PointToPoint,
-    
+
     /// ARCnet.
     ///
     /// Legacy token-passing network technology. While still supported by the
@@ -445,7 +445,7 @@ pub enum DataLinkAddress {
     /// BACnet networks share the same IP network.
     #[cfg(feature = "std")]
     Ip(SocketAddr),
-    
+
     /// Ethernet MAC address for direct Ethernet communication.
     ///
     /// Used with BACnet/Ethernet data links. The 6-byte array represents
@@ -453,7 +453,7 @@ pub enum DataLinkAddress {
     /// - `FF:FF:FF:FF:FF:FF` - Ethernet broadcast
     /// - `01:00:5E:xx:xx:xx` - IPv4 multicast range
     Ethernet([u8; 6]),
-    
+
     /// MS/TP station address.
     ///
     /// Used with MS/TP data links. Valid ranges:
@@ -461,7 +461,7 @@ pub enum DataLinkAddress {
     /// - 128-254: Slave nodes (only respond to requests)
     /// - 255: Broadcast address
     MsTP(u8),
-    
+
     /// Broadcast address for sending to all devices.
     ///
     /// This is a logical broadcast that is translated to the appropriate
