@@ -71,12 +71,12 @@
 #[cfg(feature = "std")]
 use std::{
     io::ErrorKind,
-    net::{SocketAddr, UdpSocket, ToSocketAddrs},
+    net::{SocketAddr, ToSocketAddrs, UdpSocket},
     time::{Duration, Instant},
 };
 
 #[cfg(not(feature = "std"))]
-use alloc::{vec::Vec, string::String};
+use alloc::{string::String, vec::Vec};
 
 use crate::datalink::{DataLink, DataLinkAddress, DataLinkError, DataLinkType, Result};
 
@@ -130,64 +130,64 @@ pub enum BvlcFunction {
     /// Encapsulates an NPDU for unicast delivery to a specific BACnet/IP device.
     /// This is the most common BVLC function for point-to-point communication.
     OriginalUnicastNpdu = 0x0A,
-    
+
     /// Original-Broadcast-NPDU (0x0B).
     ///
     /// Encapsulates an NPDU for broadcast delivery. The message is sent to the
     /// local IP broadcast address and to all entries in the BDT if the sender
     /// is a BBMD.
     OriginalBroadcastNpdu = 0x0B,
-    
+
     /// Forwarded-NPDU (0x04).
     ///
     /// Used by BBMDs to forward broadcasts between BACnet/IP networks. Contains
     /// the original source address before the NPDU data.
     ForwardedNpdu = 0x04,
-    
+
     /// Register-Foreign-Device (0x05).
     ///
     /// Sent by a foreign device to register with a BBMD, allowing it to receive
     /// broadcasts. Includes a Time-to-Live value in seconds.
     RegisterForeignDevice = 0x05,
-    
+
     /// Read-Broadcast-Distribution-Table (0x02).
     ///
     /// Request to read a BBMD's Broadcast Distribution Table, which lists peer
     /// BBMDs for broadcast forwarding.
     ReadBroadcastDistributionTable = 0x02,
-    
+
     /// Read-Broadcast-Distribution-Table-Ack (0x03).
     ///
     /// Response containing the requested Broadcast Distribution Table entries.
     ReadBroadcastDistributionTableAck = 0x03,
-    
+
     /// Read-Foreign-Device-Table (0x06).
     ///
     /// Request to read a BBMD's Foreign Device Table, listing registered foreign
     /// devices.
     ReadForeignDeviceTable = 0x06,
-    
+
     /// Read-Foreign-Device-Table-Ack (0x07).
     ///
     /// Response containing the requested Foreign Device Table entries.
     ReadForeignDeviceTableAck = 0x07,
-    
+
     /// Delete-Foreign-Device-Table-Entry (0x08).
     ///
     /// Request to remove a specific entry from the Foreign Device Table.
     DeleteForeignDeviceTableEntry = 0x08,
-    
+
     /// Distribute-Broadcast-To-Network (0x09).
     ///
     /// Used between BBMDs to distribute broadcast NPDUs to all devices on their
     /// respective networks.
     DistributeBroadcastToNetwork = 0x09,
-    
+
     /// Forwarded-NPDU-From-Device (0x0C).
     ///
     /// Alternative forwarding mechanism that preserves the original device address.
     ForwardedNpduFromDevice = 0x0C,
-    
+
     /// Secure-BVLL (0x0D).
     ///
     /// Used for BACnet Secure Connect (BACnet/SC) encrypted communication.
@@ -226,12 +226,12 @@ pub struct BvlcHeader {
     /// Always 0x81 for BACnet/IP. Other values are reserved for future use
     /// or indicate non-BACnet/IP frames.
     pub bvlc_type: u8,
-    
+
     /// BVLC function code.
     ///
     /// Identifies the specific BVLC operation this message performs.
     pub function: BvlcFunction,
-    
+
     /// Total message length in bytes.
     ///
     /// Includes the 4-byte BVLC header plus all following data. Maximum
@@ -385,7 +385,7 @@ pub struct BdtEntry {
     /// This is the address where broadcast messages should be forwarded.
     /// Typically uses the standard BACnet/IP port 47808.
     pub address: SocketAddr,
-    
+
     /// Broadcast distribution mask (subnet mask).
     ///
     /// Defines the IP subnet associated with this BBMD. Used to determine
@@ -436,14 +436,14 @@ pub struct FdtEntry {
     /// This is where broadcast messages will be forwarded for this
     /// registered foreign device.
     pub address: SocketAddr,
-    
+
     /// Time-to-live in seconds.
     ///
     /// The foreign device must re-register before this time expires.
     /// Typical values range from 60 seconds to several minutes.
     /// Maximum value is 65535 seconds (about 18 hours).
     pub ttl: u16,
-    
+
     /// Time when the device registered.
     ///
     /// Used to calculate when the registration expires. The entry
@@ -513,22 +513,22 @@ pub struct FdtEntry {
 pub struct BacnetIpDataLink {
     /// UDP socket for BACnet/IP communication.
     socket: UdpSocket,
-    
+
     /// Local IP address and port.
     local_addr: SocketAddr,
-    
+
     /// Broadcast Distribution Table.
     ///
     /// Contains peer BBMDs for broadcast forwarding. Only used when this
     /// device is configured as a BBMD.
     bdt: Vec<BdtEntry>,
-    
+
     /// Foreign Device Table.
     ///
     /// Contains registered foreign devices that should receive broadcasts.
     /// Only used when this device is configured as a BBMD.
     fdt: Vec<FdtEntry>,
-    
+
     /// Local broadcast address for this subnet.
     ///
     /// Calculated based on the local IP address and subnet mask.
@@ -579,18 +579,16 @@ impl BacnetIpDataLink {
     /// # }
     /// ```
     pub fn new<A: ToSocketAddrs>(bind_addr: A) -> Result<Self> {
-        let socket = UdpSocket::bind(bind_addr)
-            .map_err(DataLinkError::IoError)?;
-        
-        let local_addr = socket.local_addr()
-            .map_err(DataLinkError::IoError)?;
+        let socket = UdpSocket::bind(bind_addr).map_err(DataLinkError::IoError)?;
+
+        let local_addr = socket.local_addr().map_err(DataLinkError::IoError)?;
 
         // Enable broadcast
-        socket.set_broadcast(true)
-            .map_err(DataLinkError::IoError)?;
+        socket.set_broadcast(true).map_err(DataLinkError::IoError)?;
 
         // Set receive timeout
-        socket.set_read_timeout(Some(Duration::from_millis(100)))
+        socket
+            .set_read_timeout(Some(Duration::from_millis(100)))
             .map_err(DataLinkError::IoError)?;
 
         // Calculate broadcast address based on local address
@@ -645,15 +643,13 @@ impl BacnetIpDataLink {
     /// # }
     /// ```
     pub fn send_unicast_npdu(&mut self, npdu: &[u8], dest: SocketAddr) -> Result<()> {
-        let header = BvlcHeader::new(
-            BvlcFunction::OriginalUnicastNpdu,
-            4 + npdu.len() as u16,
-        );
+        let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, 4 + npdu.len() as u16);
 
         let mut frame = header.encode();
         frame.extend_from_slice(npdu);
 
-        self.socket.send_to(&frame, dest)
+        self.socket
+            .send_to(&frame, dest)
             .map_err(DataLinkError::IoError)?;
 
         Ok(())
@@ -690,16 +686,14 @@ impl BacnetIpDataLink {
     /// # }
     /// ```
     pub fn send_broadcast_npdu(&mut self, npdu: &[u8]) -> Result<()> {
-        let header = BvlcHeader::new(
-            BvlcFunction::OriginalBroadcastNpdu,
-            4 + npdu.len() as u16,
-        );
+        let header = BvlcHeader::new(BvlcFunction::OriginalBroadcastNpdu, 4 + npdu.len() as u16);
 
         let mut frame = header.encode();
         frame.extend_from_slice(npdu);
 
         // Send to local broadcast address
-        self.socket.send_to(&frame, self.broadcast_addr)
+        self.socket
+            .send_to(&frame, self.broadcast_addr)
             .map_err(DataLinkError::IoError)?;
 
         // Send to all BDT entries
@@ -753,7 +747,8 @@ impl BacnetIpDataLink {
         let mut frame = header.encode();
         frame.extend_from_slice(&ttl.to_be_bytes());
 
-        self.socket.send_to(&frame, bbmd_addr)
+        self.socket
+            .send_to(&frame, bbmd_addr)
             .map_err(DataLinkError::IoError)?;
 
         Ok(())
@@ -884,23 +879,19 @@ impl BacnetIpDataLink {
 impl DataLink for BacnetIpDataLink {
     fn send_frame(&mut self, frame: &[u8], dest: &DataLinkAddress) -> Result<()> {
         match dest {
-            DataLinkAddress::Ip(addr) => {
-                self.send_unicast_npdu(frame, *addr)
-            }
-            DataLinkAddress::Broadcast => {
-                self.send_broadcast_npdu(frame)
-            }
+            DataLinkAddress::Ip(addr) => self.send_unicast_npdu(frame, *addr),
+            DataLinkAddress::Broadcast => self.send_broadcast_npdu(frame),
             _ => Err(DataLinkError::UnsupportedType),
         }
     }
 
     fn receive_frame(&mut self) -> Result<(Vec<u8>, DataLinkAddress)> {
         let mut buffer = [0u8; 1500]; // MTU size
-        
+
         match self.socket.recv_from(&mut buffer) {
             Ok((len, source)) => {
                 let data = &buffer[..len];
-                
+
                 if let Some(npdu) = self.process_bvlc_message(data, source)? {
                     Ok((npdu, DataLinkAddress::Ip(source)))
                 } else {
@@ -932,7 +923,7 @@ mod tests {
     fn test_bvlc_header_encode_decode() {
         let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, 1024);
         let encoded = header.encode();
-        
+
         assert_eq!(encoded.len(), 4);
         assert_eq!(encoded[0], 0x81);
         assert_eq!(encoded[1], 0x0A);
@@ -950,7 +941,7 @@ mod tests {
     fn test_bacnet_ip_creation() {
         let result = BacnetIpDataLink::new("127.0.0.1:0");
         assert!(result.is_ok());
-        
+
         let datalink = result.unwrap();
         assert_eq!(datalink.link_type(), DataLinkType::BacnetIp);
     }

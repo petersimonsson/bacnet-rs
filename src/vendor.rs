@@ -121,7 +121,10 @@ const BACNET_VENDORS: &[(u16, &str)] = &[
     (72, "SECOM Co., Ltd."),
     (73, "ABB Gebäudetechnik AG Bereich NetServ"),
     (74, "KNX Association cvba"),
-    (75, "Institute of Electrical Installation Engineers of Japan (IEIEJ)"),
+    (
+        75,
+        "Institute of Electrical Installation Engineers of Japan (IEIEJ)",
+    ),
     (76, "Nohmi Bosai, Ltd."),
     (77, "Carel Industries S.p.A."),
     (78, "UTC Fire & Security España, S.L."),
@@ -145,7 +148,10 @@ const BACNET_VENDORS: &[(u16, &str)] = &[
     (96, "Scientech R&D, Inc."),
     (97, "VCI Controls, Inc."),
     (98, "Toshiba Corporation"),
-    (99, "Mitsubishi Electric Corporation Air Conditioning & Refrigeration Systems Works"),
+    (
+        99,
+        "Mitsubishi Electric Corporation Air Conditioning & Refrigeration Systems Works",
+    ),
     (100, "Custom Mechanical Equipment, LLC"),
     (101, "ClimateMaster"),
     (102, "ICP Panel-Tec, Inc."),
@@ -245,7 +251,10 @@ const BACNET_VENDORS: &[(u16, &str)] = &[
     (196, "Yokogawa Electric Corporation"),
     (197, "Bosch Building Automation GmbH"),
     (198, "Exact Logic"),
-    (199, "Mass Electronics Pty Ltd dba Innotech Control Systems Australia"),
+    (
+        199,
+        "Mass Electronics Pty Ltd dba Innotech Control Systems Australia",
+    ),
     (200, "Kandenko Co., Ltd."),
     (201, "DTF, Daten-Technik Fries"),
     (202, "Klimasoft, Ltd."),
@@ -998,7 +1007,10 @@ const BACNET_VENDORS: &[(u16, &str)] = &[
     (949, "Shanghai Biens Technologies Ltd"),
     (950, "Beijing HZHY Technology Co., Ltd"),
     (951, "Building Clouds"),
-    (952, "The University of Sheffield-Department of Electronic and Electrical Engineering"),
+    (
+        952,
+        "The University of Sheffield-Department of Electronic and Electrical Engineering",
+    ),
     (953, "Fabtronics Australia Pty Ltd"),
     (954, "SLAT"),
     (955, "Software Motor Corporation"),
@@ -1051,7 +1063,10 @@ const BACNET_VENDORS: &[(u16, &str)] = &[
     (1002, "Maco Lighting Pty Ltd."),
     (1003, "Axecon Corp."),
     (1004, "Tensor plc"),
-    (1005, "Kaseman Environmental Control Equipment (Shanghai) Limited"),
+    (
+        1005,
+        "Kaseman Environmental Control Equipment (Shanghai) Limited",
+    ),
     (1006, "AB Axis Industries"),
     (1007, "Netix Controls"),
     (1008, "Eldridge Products, Inc."),
@@ -1515,11 +1530,17 @@ const BACNET_VENDORS: &[(u16, &str)] = &[
     (1468, "Seeley International"),
     (1469, "Crane Building Services & Utilities"),
     (1470, "Brady Corporation"),
-    (1471, "Qingdao Hisense Hitachi Air-Conditioning Systems Co., Ltd."),
+    (
+        1471,
+        "Qingdao Hisense Hitachi Air-Conditioning Systems Co., Ltd.",
+    ),
     (1472, "Golden Quality Co. Ltd."),
     (1473, "Elvaco AB"),
     (1474, "Strong Technology, LLC"),
-    (1475, "REC Environmental Technology (Guangzhou) Company Limited"),
+    (
+        1475,
+        "REC Environmental Technology (Guangzhou) Company Limited",
+    ),
     (1476, "Disruptive Technologies Research AS"),
     (1477, "Nico Consultancy Limited"),
     (1478, "Horten lot (Jiangsu) Co., Ltd."),
@@ -1598,10 +1619,7 @@ pub fn get_vendor_info(vendor_id: u16) -> Option<VendorInfo> {
     BACNET_VENDORS
         .iter()
         .find(|(id, _)| *id == vendor_id)
-        .map(|(id, name)| VendorInfo {
-            id: *id,
-            name,
-        })
+        .map(|(id, name)| VendorInfo { id: *id, name })
 }
 
 /// Get vendor name by vendor ID
@@ -1633,10 +1651,7 @@ pub fn find_vendors_by_name(pattern: &str) -> Vec<VendorInfo> {
     BACNET_VENDORS
         .iter()
         .filter(|(_, name)| name.to_lowercase().contains(&pattern_lower))
-        .map(|(id, name)| VendorInfo {
-            id: *id,
-            name,
-        })
+        .map(|(id, name)| VendorInfo { id: *id, name })
         .collect()
 }
 
@@ -1648,7 +1663,7 @@ pub fn get_vendor_statistics() -> VendorStatistics {
         .filter(|(id, _)| is_vendor_id_reserved(*id))
         .count();
     let assigned_count = total_vendors - reserved_count;
-    
+
     VendorStatistics {
         total_vendors,
         assigned_vendors: assigned_count,
@@ -1683,7 +1698,7 @@ pub fn format_vendor_display(vendor_id: u16) -> String {
         Some(name) => {
             #[cfg(feature = "std")]
             return format!("{} (ID: {})", name, vendor_id);
-            
+
             #[cfg(not(feature = "std"))]
             {
                 use alloc::format;
@@ -1693,7 +1708,7 @@ pub fn format_vendor_display(vendor_id: u16) -> String {
         None => {
             #[cfg(feature = "std")]
             return format!("Unknown Vendor (ID: {})", vendor_id);
-            
+
             #[cfg(not(feature = "std"))]
             {
                 use alloc::format;
@@ -1722,7 +1737,7 @@ mod tests {
         let vendor = get_vendor_info(2).unwrap();
         assert_eq!(vendor.id, 2);
         assert_eq!(vendor.name, "The Trane Company");
-        
+
         assert!(get_vendor_info(9999).is_none());
     }
 
@@ -1747,7 +1762,7 @@ mod tests {
     fn test_find_vendors_by_name() {
         let schneider_vendors = find_vendors_by_name("Schneider");
         assert!(!schneider_vendors.is_empty());
-        
+
         let trane_vendors = find_vendors_by_name("Trane");
         assert!(!trane_vendors.is_empty());
         assert!(trane_vendors.iter().any(|v| v.name.contains("Trane")));
@@ -1759,7 +1774,10 @@ mod tests {
         assert!(stats.total_vendors > 0);
         assert!(stats.assigned_vendors > 0);
         assert!(stats.reserved_vendors > 0);
-        assert_eq!(stats.total_vendors, stats.assigned_vendors + stats.reserved_vendors);
+        assert_eq!(
+            stats.total_vendors,
+            stats.assigned_vendors + stats.reserved_vendors
+        );
     }
 
     #[test]
@@ -1767,7 +1785,7 @@ mod tests {
         let display = format_vendor_display(2);
         assert!(display.contains("The Trane Company"));
         assert!(display.contains("ID: 2"));
-        
+
         let unknown = format_vendor_display(9999);
         assert!(unknown.contains("Unknown Vendor"));
         assert!(unknown.contains("ID: 9999"));

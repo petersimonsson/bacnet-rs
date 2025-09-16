@@ -3,7 +3,7 @@
 //! This example tests the high-level BACnet client utilities
 //! with comprehensive engineering units support.
 
-use bacnet_rs::client::{BacnetClient, get_object_type_name};
+use bacnet_rs::client::{get_object_type_name, BacnetClient};
 use bacnet_rs::property::{decode_units, get_unit_id};
 use std::env;
 
@@ -28,10 +28,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Discover device
     println!("Discovering device at {}...", target_addr);
     let device_info = client.discover_device(target_addr)?;
-    
+
     println!("Found device:");
     println!("  Device ID: {}", device_info.device_id);
-    println!("  Vendor: {} (ID: {})", device_info.vendor_name, device_info.vendor_id);
+    println!(
+        "  Vendor: {} (ID: {})",
+        device_info.vendor_name, device_info.vendor_id
+    );
     println!("  Max APDU: {}", device_info.max_apdu);
     println!("  Address: {}", device_info.address);
     println!();
@@ -58,29 +61,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let objects_info = client.read_objects_properties(target_addr, sample_objects)?;
 
     for obj_info in &objects_info {
-        println!("\n{} Instance {}:", 
-                 get_object_type_name(obj_info.object_identifier.object_type),
-                 obj_info.object_identifier.instance);
-        
+        println!(
+            "\n{} Instance {}:",
+            get_object_type_name(obj_info.object_identifier.object_type),
+            obj_info.object_identifier.instance
+        );
+
         if let Some(name) = &obj_info.object_name {
             println!("  Name: {}", name);
         }
-        
+
         if let Some(desc) = &obj_info.description {
             println!("  Description: {}", desc);
         }
-        
+
         if let Some(value) = &obj_info.present_value {
             println!("  Present Value: {:?}", value);
         }
-        
+
         if let Some(units) = &obj_info.units {
             println!("  Units: {}", units);
             if let Some(unit_id) = get_unit_id(units) {
                 println!("  Unit ID: {}", unit_id);
             }
         }
-        
+
         if let Some(flags) = &obj_info.status_flags {
             println!("  Status Flags: {:?}", flags);
         }
@@ -89,10 +94,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Test some unit conversions
     println!("\nUnit System Test:");
     println!("================");
-    
+
     let test_units = vec![
         ("degrees-celsius", 62),
-        ("kilowatts", 115), 
+        ("kilowatts", 115),
         ("cubic-feet-per-minute", 94),
         ("percent", 1),
         ("amperes", 23),
@@ -104,7 +109,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if actual_id == expected_id {
                 println!("✓ {}: ID {} (correct)", unit_name, actual_id);
             } else {
-                println!("✗ {}: expected ID {}, got {}", unit_name, expected_id, actual_id);
+                println!(
+                    "✗ {}: expected ID {}, got {}",
+                    unit_name, expected_id, actual_id
+                );
             }
         } else {
             println!("✗ {}: not found in unit database", unit_name);
@@ -114,7 +122,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Test decoding some units
     println!("\nUnit Decoding Test:");
     println!("==================");
-    
+
     let test_data = vec![
         ([0x91, 62], "degrees-celsius"),
         ([0x91, 115], "kilowatts"),
@@ -127,7 +135,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if actual_name == expected_name && consumed == 2 {
                 println!("✓ Decoded unit ID {}: {} (correct)", data[1], actual_name);
             } else {
-                println!("✗ Decoded unit ID {}: expected '{}', got '{}'", data[1], expected_name, actual_name);
+                println!(
+                    "✗ Decoded unit ID {}: expected '{}', got '{}'",
+                    data[1], expected_name, actual_name
+                );
             }
         } else {
             println!("✗ Failed to decode unit ID {}", data[1]);

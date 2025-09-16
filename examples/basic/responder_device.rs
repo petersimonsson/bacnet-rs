@@ -4,15 +4,15 @@
 //! with I-Am responses, allowing it to be discovered by the Who-Is scan.
 
 use bacnet_rs::{
-    service::{WhoIsRequest, IAmRequest, UnconfirmedServiceChoice},
     network::Npdu,
     object::Device,
+    service::{IAmRequest, UnconfirmedServiceChoice, WhoIsRequest},
 };
 use std::{
     net::{SocketAddr, UdpSocket},
-    time::Duration,
-    sync::Arc,
     sync::atomic::{AtomicBool, Ordering},
+    sync::Arc,
+    time::Duration,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let socket = UdpSocket::bind(bind_addr)?;
     socket.set_broadcast(true)?;
     socket.set_read_timeout(Some(Duration::from_millis(100)))?;
-    
+
     println!("Listening on {}...", bind_addr);
     println!("Device is ready to respond to Who-Is requests!");
     println!("Press Ctrl+C to stop.\n");
@@ -53,10 +53,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Set up Ctrl+C handler
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
-    
+
     ctrlc::set_handler(move || {
         r.store(false, Ordering::SeqCst);
-    }).expect("Error setting Ctrl-C handler");
+    })
+    .expect("Error setting Ctrl-C handler");
 
     let mut recv_buffer = [0u8; 1500];
     let mut response_count = 0;
@@ -69,13 +70,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // Check if this Who-Is is for us
                     if whois.matches(device_id) {
                         println!("Received Who-Is from {} (matches our device)", source);
-                        
+
                         // Send I-Am response
                         if let Ok(response) = create_iam_response(&device, source) {
                             match socket.send_to(&response, source) {
                                 Ok(_) => {
                                     response_count += 1;
-                                    println!("Sent I-Am response #{} to {}", response_count, source);
+                                    println!(
+                                        "Sent I-Am response #{} to {}",
+                                        response_count, source
+                                    );
                                 }
                                 Err(e) => {
                                     eprintln!("Failed to send I-Am: {}", e);
@@ -98,7 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\nShutting down...");
     println!("Total I-Am responses sent: {}", response_count);
-    
+
     Ok(())
 }
 
@@ -108,49 +112,49 @@ fn process_whois(data: &[u8]) -> Option<WhoIsRequest> {
     if data.len() < 4 || data[0] != 0x81 {
         return None;
     }
-    
+
     let bvlc_function = data[1];
     let bvlc_length = ((data[2] as u16) << 8) | (data[3] as u16);
-    
+
     if data.len() != bvlc_length as usize {
         return None;
     }
-    
+
     // Skip BVLC header to get to NPDU
     let npdu_start = match bvlc_function {
         0x0A | 0x0B => 4, // Original-Unicast/Broadcast-NPDU
-        0x04 => 10, // Forwarded-NPDU
+        0x04 => 10,       // Forwarded-NPDU
         _ => return None,
     };
-    
+
     if data.len() <= npdu_start {
         return None;
     }
-    
+
     // Decode NPDU
     let (_npdu, npdu_len) = match Npdu::decode(&data[npdu_start..]) {
         Ok(result) => result,
         Err(_) => return None,
     };
-    
+
     // Skip to APDU
     let apdu_start = npdu_start + npdu_len;
     if data.len() <= apdu_start {
         return None;
     }
-    
+
     let apdu = &data[apdu_start..];
-    
+
     // Check if this is an unconfirmed Who-Is service
     if apdu.len() < 2 || apdu[0] != 0x10 {
         return None;
     }
-    
+
     let service_choice = apdu[1];
     if service_choice != UnconfirmedServiceChoice::WhoIs as u8 {
         return None;
     }
-    
+
     // Decode Who-Is request
     if apdu.len() > 2 {
         WhoIsRequest::decode(&apdu[2..]).ok()
@@ -161,7 +165,10 @@ fn process_whois(data: &[u8]) -> Option<WhoIsRequest> {
 }
 
 /// Create an I-Am response message
-fn create_iam_response(device: &Device, _destination: SocketAddr) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+fn create_iam_response(
+    device: &Device,
+    _destination: SocketAddr,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     // Create I-Am request
     let iam = IAmRequest::new(
         device.identifier.clone(),
@@ -169,25 +176,25 @@ fn create_iam_response(device: &Device, _destination: SocketAddr) -> Result<Vec<
         0,    // Segmentation: both
         device.vendor_identifier as u32,
     );
-    
+
     let mut iam_buffer = Vec::new();
     iam.encode(&mut iam_buffer)?;
-    
+
     // Create NPDU
     let mut npdu = Npdu::new();
     npdu.control.priority = 0; // Normal priority
-    
+
     let npdu_buffer = npdu.encode();
-    
+
     // Create unconfirmed service request APDU
     let mut apdu = vec![0x10]; // Unconfirmed-Request PDU type
     apdu.push(UnconfirmedServiceChoice::IAm as u8);
     apdu.extend_from_slice(&iam_buffer);
-    
+
     // Combine NPDU and APDU
     let mut message = npdu_buffer;
     message.extend_from_slice(&apdu);
-    
+
     // Wrap in BVLC header for BACnet/IP
     let mut bvlc_message = vec![
         0x81, // BVLC Type
@@ -195,11 +202,11 @@ fn create_iam_response(device: &Device, _destination: SocketAddr) -> Result<Vec<
         0x00, 0x00, // Length placeholder
     ];
     bvlc_message.extend_from_slice(&message);
-    
+
     // Update BVLC length
     let total_len = bvlc_message.len() as u16;
     bvlc_message[2] = (total_len >> 8) as u8;
     bvlc_message[3] = (total_len & 0xFF) as u8;
-    
+
     Ok(bvlc_message)
 }
