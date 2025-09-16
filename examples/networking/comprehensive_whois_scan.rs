@@ -145,10 +145,7 @@ fn discover_routers(
     let network_msg = vec![0x01]; // Who-Is-Router-To-Network
     let npdu_bytes = encode_npdu_with_data(&npdu, &network_msg);
 
-    let header = BvlcHeader::new(
-        BvlcFunction::OriginalBroadcastNpdu,
-        4 + npdu_bytes.len() as u16,
-    );
+    let header = BvlcHeader::new(BvlcFunction::OriginalBroadcastNpdu, npdu_bytes.len() as u16);
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
 
@@ -201,10 +198,7 @@ fn discover_devices_global(
     let npdu = Npdu::global_broadcast();
     let npdu_bytes = encode_npdu_with_data(&npdu, &apdu);
 
-    let header = BvlcHeader::new(
-        BvlcFunction::OriginalBroadcastNpdu,
-        4 + npdu_bytes.len() as u16,
-    );
+    let header = BvlcHeader::new(BvlcFunction::OriginalBroadcastNpdu, npdu_bytes.len() as u16);
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
 
@@ -236,10 +230,7 @@ fn discover_devices_on_network(
 
     let npdu_bytes = encode_npdu_with_data(&npdu, &apdu);
 
-    let header = BvlcHeader::new(
-        BvlcFunction::OriginalBroadcastNpdu,
-        4 + npdu_bytes.len() as u16,
-    );
+    let header = BvlcHeader::new(BvlcFunction::OriginalBroadcastNpdu, npdu_bytes.len() as u16);
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
 
@@ -808,10 +799,7 @@ fn send_request_and_get_response(
     }
 
     let npdu_bytes = encode_npdu_with_data(&npdu, apdu);
-    let header = BvlcHeader::new(
-        BvlcFunction::OriginalUnicastNpdu,
-        4 + npdu_bytes.len() as u16,
-    );
+    let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, npdu_bytes.len() as u16);
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
 

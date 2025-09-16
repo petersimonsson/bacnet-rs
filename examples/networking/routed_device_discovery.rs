@@ -159,10 +159,7 @@ fn discover_routers(
     let npdu_bytes = encode_npdu_with_data(&npdu, &network_msg);
 
     // Wrap in BVLC header for broadcast
-    let header = BvlcHeader::new(
-        BvlcFunction::OriginalBroadcastNpdu,
-        4 + npdu_bytes.len() as u16,
-    );
+    let header = BvlcHeader::new(BvlcFunction::OriginalBroadcastNpdu, npdu_bytes.len() as u16);
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
 
@@ -232,10 +229,7 @@ fn discover_devices_global(
     let npdu_bytes = encode_npdu_with_data(&npdu, &apdu);
 
     // Wrap in BVLC header for broadcast
-    let header = BvlcHeader::new(
-        BvlcFunction::OriginalBroadcastNpdu,
-        4 + npdu_bytes.len() as u16,
-    );
+    let header = BvlcHeader::new(BvlcFunction::OriginalBroadcastNpdu, npdu_bytes.len() as u16);
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
 
@@ -286,10 +280,7 @@ fn discover_devices_on_network(
     let npdu_bytes = encode_npdu_with_data(&npdu, &apdu);
 
     // Wrap in BVLC header for broadcast
-    let header = BvlcHeader::new(
-        BvlcFunction::OriginalBroadcastNpdu,
-        4 + npdu_bytes.len() as u16,
-    );
+    let header = BvlcHeader::new(BvlcFunction::OriginalBroadcastNpdu, npdu_bytes.len() as u16);
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
 
@@ -548,10 +539,7 @@ fn read_property(
     let npdu_bytes = encode_npdu_with_data(&npdu, &apdu);
 
     // Wrap in BVLC header for unicast
-    let header = BvlcHeader::new(
-        BvlcFunction::OriginalUnicastNpdu,
-        4 + npdu_bytes.len() as u16,
-    );
+    let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, npdu_bytes.len() as u16);
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
 
@@ -906,10 +894,7 @@ fn read_object_property(
 
     let npdu_bytes = encode_npdu_with_data(&npdu, &apdu);
 
-    let header = BvlcHeader::new(
-        BvlcFunction::OriginalUnicastNpdu,
-        4 + npdu_bytes.len() as u16,
-    );
+    let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, npdu_bytes.len() as u16);
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
 
@@ -1012,10 +997,7 @@ fn read_property_with_array_index(
     }
 
     let npdu_bytes = encode_npdu_with_data(&npdu, &apdu);
-    let header = BvlcHeader::new(
-        BvlcFunction::OriginalUnicastNpdu,
-        4 + npdu_bytes.len() as u16,
-    );
+    let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, npdu_bytes.len() as u16);
     let mut frame = header.encode();
     frame.extend_from_slice(&npdu_bytes);
 

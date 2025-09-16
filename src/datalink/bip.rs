@@ -215,7 +215,7 @@ pub enum BvlcFunction {
 /// use bacnet_rs::datalink::bip::{BvlcHeader, BvlcFunction};
 ///
 /// // Create header for a 20-byte unicast NPDU
-/// let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, 24);
+/// let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, 20);
 /// assert_eq!(header.bvlc_type, 0x81);
 /// assert_eq!(header.length, 24);  // 4-byte header + 20-byte NPDU
 /// ```
@@ -248,7 +248,7 @@ impl BvlcHeader {
     /// # Arguments
     ///
     /// * `function` - The BVLC function for this message
-    /// * `length` - Total message length including the 4-byte header
+    /// * `length` - length of everything except the header
     ///
     /// # Examples
     ///
@@ -259,14 +259,14 @@ impl BvlcHeader {
     /// let npdu_size = 50;
     /// let header = BvlcHeader::new(
     ///     BvlcFunction::OriginalBroadcastNpdu,
-    ///     4 + npdu_size  // Header + NPDU
+    ///     npdu_size
     /// );
     /// ```
     pub fn new(function: BvlcFunction, length: u16) -> Self {
         Self {
             bvlc_type: 0x81, // BACnet/IP
             function,
-            length,
+            length: length + 4,
         }
     }
 
@@ -281,7 +281,7 @@ impl BvlcHeader {
     /// ```
     /// use bacnet_rs::datalink::bip::{BvlcHeader, BvlcFunction};
     ///
-    /// let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, 100);
+    /// let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, 96);
     /// let bytes = header.encode();
     /// assert_eq!(bytes, vec![0x81, 0x0A, 0x00, 0x64]);
     /// ```
@@ -302,7 +302,7 @@ impl BvlcHeader {
     ///
     /// # Returns
     ///
-    /// The decoded BVLC header.
+    /// The decoded BVLC header and the length of the header.
     ///
     /// # Errors
     ///
@@ -317,10 +317,11 @@ impl BvlcHeader {
     /// use bacnet_rs::datalink::bip::BvlcHeader;
     ///
     /// let data = vec![0x81, 0x0A, 0x00, 0x64];
-    /// let header = BvlcHeader::decode(&data).unwrap();
+    /// let (header, header_len) = BvlcHeader::decode(&data).unwrap();
     /// assert_eq!(header.length, 100);
+    /// assert_eq!(header_len, 4);
     /// ```
-    pub fn decode(data: &[u8]) -> Result<Self> {
+    pub fn decode(data: &[u8]) -> Result<(Self, usize)> {
         if data.len() < 4 {
             return Err(DataLinkError::InvalidFrame);
         }
@@ -329,6 +330,8 @@ impl BvlcHeader {
         if bvlc_type != 0x81 {
             return Err(DataLinkError::InvalidFrame);
         }
+
+        let mut header_len = 1;
 
         let function = match data[1] {
             0x0A => BvlcFunction::OriginalUnicastNpdu,
@@ -346,13 +349,19 @@ impl BvlcHeader {
             _ => return Err(DataLinkError::InvalidFrame),
         };
 
-        let length = ((data[2] as u16) << 8) | (data[3] as u16);
+        header_len += 1;
 
-        Ok(BvlcHeader {
-            bvlc_type,
-            function,
-            length,
-        })
+        let length = ((data[2] as u16) << 8) | (data[3] as u16);
+        header_len += 2;
+
+        Ok((
+            BvlcHeader {
+                bvlc_type,
+                function,
+                length,
+            },
+            header_len,
+        ))
     }
 }
 
@@ -643,7 +652,7 @@ impl BacnetIpDataLink {
     /// # }
     /// ```
     pub fn send_unicast_npdu(&mut self, npdu: &[u8], dest: SocketAddr) -> Result<()> {
-        let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, 4 + npdu.len() as u16);
+        let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, npdu.len() as u16);
 
         let mut frame = header.encode();
         frame.extend_from_slice(npdu);
@@ -686,7 +695,7 @@ impl BacnetIpDataLink {
     /// # }
     /// ```
     pub fn send_broadcast_npdu(&mut self, npdu: &[u8]) -> Result<()> {
-        let header = BvlcHeader::new(BvlcFunction::OriginalBroadcastNpdu, 4 + npdu.len() as u16);
+        let header = BvlcHeader::new(BvlcFunction::OriginalBroadcastNpdu, npdu.len() as u16);
 
         let mut frame = header.encode();
         frame.extend_from_slice(npdu);
@@ -743,7 +752,7 @@ impl BacnetIpDataLink {
     /// # }
     /// ```
     pub fn register_foreign_device(&mut self, bbmd_addr: SocketAddr, ttl: u16) -> Result<()> {
-        let header = BvlcHeader::new(BvlcFunction::RegisterForeignDevice, 6);
+        let header = BvlcHeader::new(BvlcFunction::RegisterForeignDevice, 2);
         let mut frame = header.encode();
         frame.extend_from_slice(&ttl.to_be_bytes());
 
@@ -832,7 +841,7 @@ impl BacnetIpDataLink {
     ///
     /// Returns an error if the message format is invalid.
     fn process_bvlc_message(&mut self, data: &[u8], source: SocketAddr) -> Result<Option<Vec<u8>>> {
-        let header = BvlcHeader::decode(data)?;
+        let (header, header_len) = BvlcHeader::decode(data)?;
 
         if data.len() != header.length as usize {
             return Err(DataLinkError::InvalidFrame);
@@ -841,24 +850,24 @@ impl BacnetIpDataLink {
         match header.function {
             BvlcFunction::OriginalUnicastNpdu | BvlcFunction::OriginalBroadcastNpdu => {
                 // Return the NPDU portion (skip 4-byte BVLC header)
-                if data.len() > 4 {
-                    Ok(Some(data[4..].to_vec()))
+                if data.len() > header_len {
+                    Ok(Some(data[header_len..].to_vec()))
                 } else {
                     Err(DataLinkError::InvalidFrame)
                 }
             }
             BvlcFunction::ForwardedNpdu => {
                 // Forwarded NPDU has original source address after header
-                if data.len() > 10 {
-                    Ok(Some(data[10..].to_vec()))
+                if data.len() > header_len + 6 {
+                    Ok(Some(data[header_len + 6..].to_vec()))
                 } else {
                     Err(DataLinkError::InvalidFrame)
                 }
             }
             BvlcFunction::RegisterForeignDevice => {
                 // Handle foreign device registration
-                if data.len() == 6 {
-                    let ttl = u16::from_be_bytes([data[4], data[5]]);
+                if data.len() == header_len + 2 {
+                    let ttl = u16::from_be_bytes([data[header_len], data[header_len + 1]]);
                     self.fdt.push(FdtEntry {
                         address: source,
                         ttl,
@@ -921,7 +930,7 @@ mod tests {
 
     #[test]
     fn test_bvlc_header_encode_decode() {
-        let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, 1024);
+        let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, 1020);
         let encoded = header.encode();
 
         assert_eq!(encoded.len(), 4);
@@ -930,7 +939,8 @@ mod tests {
         assert_eq!(encoded[2], 0x04);
         assert_eq!(encoded[3], 0x00);
 
-        let decoded = BvlcHeader::decode(&encoded).unwrap();
+        let (decoded, header_len) = BvlcHeader::decode(&encoded).unwrap();
+        assert_eq!(header_len, 4);
         assert_eq!(decoded.bvlc_type, 0x81);
         assert_eq!(decoded.function, BvlcFunction::OriginalUnicastNpdu);
         assert_eq!(decoded.length, 1024);
