@@ -645,7 +645,7 @@ mod tests {
         });
 
         let who_is_apdu = Apdu::UnconfirmedRequest {
-            service_choice: UnconfirmedServiceChoice::WhoIs as u8,
+            service_choice: UnconfirmedServiceChoice::WhoIs,
             service_data: vec![],
         };
 

@@ -165,6 +165,10 @@
 //!     ServiceError::Rejected(r) => println!("Rejected: {r:?}"),
 //!     ServiceError::Aborted(r) => println!("Aborted: {r:?}"),
 //!     ServiceError::EncodingError(s) => println!("EncodingError: {s}"),
+//!     ServiceError::UnsupportedUnconfirmedServiceChoice(c) =>
+//!         println!("UnsupportedUnconfirmedServiceChoice: {}", c),
+//!     ServiceError::UnsupportedConfirmedServiceChoice(c) =>
+//!         println!("UnsupportedConfirmedServiceChoice: {}", c),
 //! }
 //! ```
 //!
@@ -216,7 +220,7 @@ pub enum ServiceError {
     /// Encoding/decoding error
     EncodingError(String),
     /// UnconfirmedServiceChoice is not supported,
-    UnsupportedUnconfirmedServiceChoice,
+    UnsupportedUnconfirmedServiceChoice(u8),
 }
 
 impl fmt::Display for ServiceError {
@@ -228,8 +232,8 @@ impl fmt::Display for ServiceError {
             ServiceError::Rejected(reason) => write!(f, "Service rejected: {:?}", reason),
             ServiceError::Aborted(reason) => write!(f, "Service aborted: {:?}", reason),
             ServiceError::EncodingError(msg) => write!(f, "Encoding error: {}", msg),
-            ServiceError::UnsupportedUnconfirmedServiceChoice => {
-                write!(f, "UnconfirmedServiceChoice not supported")
+            ServiceError::UnsupportedUnconfirmedServiceChoice(code) => {
+                write!(f, "UnconfirmedServiceChoice not supported: {}", code)
             }
         }
     }
@@ -300,13 +304,16 @@ impl TryFrom<u8> for UnconfirmedServiceChoice {
         match value {
             0 => Ok(UnconfirmedServiceChoice::IAm),
             1 => Ok(UnconfirmedServiceChoice::IHave),
-            2 => Ok(UnconfirmedServiceChoice::UnconfirmedEventNotification),
-            3 => Ok(UnconfirmedServiceChoice::UnconfirmedPrivateTransfer),
-            4 => Ok(UnconfirmedServiceChoice::UnconfirmedTextMessage),
-            5 => Ok(UnconfirmedServiceChoice::TimeSynchronization),
-            6 => Ok(UnconfirmedServiceChoice::WhoHas),
-            7 => Ok(UnconfirmedServiceChoice::UtcTimeSynchronization),
-            _ => Err(ServiceError::UnsupportedUnconfirmedServiceChoice),
+            3 => Ok(UnconfirmedServiceChoice::UnconfirmedEventNotification),
+            4 => Ok(UnconfirmedServiceChoice::UnconfirmedPrivateTransfer),
+            5 => Ok(UnconfirmedServiceChoice::UnconfirmedTextMessage),
+            6 => Ok(UnconfirmedServiceChoice::TimeSynchronization),
+            7 => Ok(UnconfirmedServiceChoice::WhoHas),
+            8 => Ok(UnconfirmedServiceChoice::WhoIs),
+            9 => Ok(UnconfirmedServiceChoice::UtcTimeSynchronization),
+            unsupported => Err(ServiceError::UnsupportedUnconfirmedServiceChoice(
+                unsupported,
+            )),
         }
     }
 }

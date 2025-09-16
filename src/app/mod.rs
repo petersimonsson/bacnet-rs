@@ -32,7 +32,7 @@
 //!
 //! // Example of creating an APDU
 //! let apdu = Apdu::UnconfirmedRequest {
-//!     service_choice: UnconfirmedServiceChoice::WhoIs as u8,
+//!     service_choice: UnconfirmedServiceChoice::WhoIs,
 //!     service_data: vec![],
 //! };
 //! ```
@@ -552,9 +552,9 @@ impl Apdu {
                     ));
                 }
 
-                let service_choice = data[1].try_into().map_err(|_| {
-                    ApplicationError::InvalidApdu("Unsupported service choice".to_string())
-                })?;
+                let service_choice = data[1]
+                    .try_into()
+                    .map_err(|e: ServiceError| ApplicationError::InvalidApdu(e.to_string()))?;
                 let service_data = if data.len() > 2 {
                     data[2..].to_vec()
                 } else {
@@ -1706,7 +1706,7 @@ mod tests {
     #[test]
     fn test_unconfirmed_request_encode_decode() {
         let apdu = Apdu::UnconfirmedRequest {
-            service_choice: 8,                          // WhoIs
+            service_choice: UnconfirmedServiceChoice::WhoIs,
             service_data: vec![0x08, 0x7B, 0x18, 0x7B], // Range 123-123
         };
 
@@ -1718,7 +1718,7 @@ mod tests {
                 service_choice,
                 service_data,
             } => {
-                assert_eq!(service_choice, 8);
+                assert_eq!(service_choice, UnconfirmedServiceChoice::WhoIs);
                 assert_eq!(service_data, vec![0x08, 0x7B, 0x18, 0x7B]);
             }
             _ => panic!("Expected UnconfirmedRequest"),
