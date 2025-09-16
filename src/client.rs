@@ -343,28 +343,30 @@ impl BacnetClient {
 
         // Decode APDU
         let apdu_start = npdu_start + npdu_len;
-        let apdu = &data[apdu_start..];
+        let apdu = Apdu::decode(&data[apdu_start..]).ok()?;
 
-        if apdu.len() < 2 || apdu[0] != 0x10 || apdu[1] != UnconfirmedServiceChoice::IAm as u8 {
-            return None;
-        }
+        match apdu {
+            Apdu::UnconfirmedRequest {
+                service_choice: UnconfirmedServiceChoice::IAm,
+                service_data,
+            } => match IAmRequest::decode(&service_data) {
+                Ok(iam) => {
+                    let vendor_name = crate::vendor::get_vendor_name(iam.vendor_identifier as u16)
+                        .unwrap_or("Unknown Vendor")
+                        .to_string();
 
-        match IAmRequest::decode(&apdu[2..]) {
-            Ok(iam) => {
-                let vendor_name = crate::vendor::get_vendor_name(iam.vendor_identifier as u16)
-                    .unwrap_or("Unknown Vendor")
-                    .to_string();
-
-                Some(DeviceInfo {
-                    device_id: iam.device_identifier.instance,
-                    address: source,
-                    vendor_id: iam.vendor_identifier,
-                    vendor_name,
-                    max_apdu: iam.max_apdu_length_accepted,
-                    segmentation: iam.segmentation_supported,
-                })
-            }
-            Err(_) => None,
+                    Some(DeviceInfo {
+                        device_id: iam.device_identifier.instance,
+                        address: source,
+                        vendor_id: iam.vendor_identifier,
+                        vendor_name,
+                        max_apdu: iam.max_apdu_length_accepted,
+                        segmentation: iam.segmentation_supported,
+                    })
+                }
+                Err(_) => None,
+            },
+            _ => None,
         }
     }
 
