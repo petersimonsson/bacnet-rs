@@ -13,6 +13,7 @@ use bacnet_rs::{
     network::Npdu,
     object::{BacnetObject, Device, ObjectIdentifier, ObjectType, PropertyIdentifier},
     service::{IAmRequest, ReadPropertyRequest, UnconfirmedServiceChoice, WhoIsRequest},
+    ConfirmedServiceChoice,
 };
 
 use std::net::SocketAddr;
@@ -121,7 +122,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         invoke_id: 42,
         sequence_number: None,
         proposed_window_size: None,
-        service_choice: 12, // Read Property
+        service_choice: ConfirmedServiceChoice::ReadProperty,
         service_data: read_prop_data,
     };
 

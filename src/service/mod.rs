@@ -221,6 +221,8 @@ pub enum ServiceError {
     EncodingError(String),
     /// UnconfirmedServiceChoice is not supported,
     UnsupportedUnconfirmedServiceChoice(u8),
+    /// ConfirmedServiceChoice is not supported,
+    UnsupportedConfirmedServiceChoice(u8),
 }
 
 impl fmt::Display for ServiceError {
@@ -234,6 +236,9 @@ impl fmt::Display for ServiceError {
             ServiceError::EncodingError(msg) => write!(f, "Encoding error: {}", msg),
             ServiceError::UnsupportedUnconfirmedServiceChoice(code) => {
                 write!(f, "UnconfirmedServiceChoice not supported: {}", code)
+            }
+            ServiceError::UnsupportedConfirmedServiceChoice(code) => {
+                write!(f, "ConfirmedServiceChoice not supported: {}", code)
             }
         }
     }
@@ -280,6 +285,39 @@ pub enum ConfirmedServiceChoice {
     ReadRange = 26,
     SubscribeCOV = 5,
     SubscribeCOVProperty = 28,
+}
+
+impl TryFrom<u8> for ConfirmedServiceChoice {
+    type Error = ServiceError;
+
+    fn try_from(value: u8) -> core::result::Result<Self, Self::Error> {
+        match value {
+            0 => Ok(ConfirmedServiceChoice::AcknowledgeAlarm),
+            2 => Ok(ConfirmedServiceChoice::ConfirmedEventNotification),
+            3 => Ok(ConfirmedServiceChoice::GetAlarmSummary),
+            4 => Ok(ConfirmedServiceChoice::GetEnrollmentSummary),
+            5 => Ok(ConfirmedServiceChoice::SubscribeCOV),
+            6 => Ok(ConfirmedServiceChoice::AtomicReadFile),
+            7 => Ok(ConfirmedServiceChoice::AtomicWriteFile),
+            8 => Ok(ConfirmedServiceChoice::AddListElement),
+            9 => Ok(ConfirmedServiceChoice::RemoveListElement),
+            10 => Ok(ConfirmedServiceChoice::CreateObject),
+            11 => Ok(ConfirmedServiceChoice::DeleteObject),
+            12 => Ok(ConfirmedServiceChoice::ReadProperty),
+            14 => Ok(ConfirmedServiceChoice::ReadPropertyMultiple),
+            15 => Ok(ConfirmedServiceChoice::WriteProperty),
+            16 => Ok(ConfirmedServiceChoice::WritePropertyMultiple),
+            17 => Ok(ConfirmedServiceChoice::DeviceCommunicationControl),
+            20 => Ok(ConfirmedServiceChoice::ReinitializeDevice),
+            21 => Ok(ConfirmedServiceChoice::VtOpen),
+            22 => Ok(ConfirmedServiceChoice::VtClose),
+            23 => Ok(ConfirmedServiceChoice::VtData),
+            26 => Ok(ConfirmedServiceChoice::ReadRange),
+            28 => Ok(ConfirmedServiceChoice::SubscribeCOVProperty),
+            29 => Ok(ConfirmedServiceChoice::GetEventInformation),
+            unsupported => Err(ServiceError::UnsupportedConfirmedServiceChoice(unsupported)),
+        }
+    }
 }
 
 /// Unconfirmed service choices

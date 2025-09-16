@@ -54,6 +54,7 @@ use core::time::Duration;
 
 use crate::object::Segmentation;
 use crate::service::{AbortReason, ConfirmedServiceChoice, RejectReason, UnconfirmedServiceChoice};
+use crate::ServiceError;
 
 /// Result type for application layer operations
 #[cfg(feature = "std")]
@@ -125,7 +126,7 @@ pub enum Apdu {
         invoke_id: u8,
         sequence_number: Option<u8>,
         proposed_window_size: Option<u8>,
-        service_choice: u8,
+        service_choice: ConfirmedServiceChoice,
         service_data: Vec<u8>,
     },
 
@@ -294,7 +295,7 @@ impl Apdu {
                 }
 
                 // Service choice
-                buffer.push(*service_choice);
+                buffer.push(*service_choice as u8);
 
                 // Service data
                 buffer.extend_from_slice(service_data);
@@ -522,7 +523,9 @@ impl Apdu {
                     ));
                 }
 
-                let service_choice = data[pos];
+                let service_choice = data[pos]
+                    .try_into()
+                    .map_err(|e: ServiceError| ApplicationError::InvalidApdu(e.to_string()))?;
                 pos += 1;
 
                 let service_data = if pos < data.len() {
@@ -1248,29 +1251,13 @@ impl ApplicationLayerHandler {
         &mut self,
         _pdu_flags: PduFlags,
         invoke_id: u8,
-        service_choice: u8,
+        service_choice: ConfirmedServiceChoice,
         service_data: &[u8],
     ) -> Result<Option<Apdu>> {
         self.stats.confirmed_requests += 1;
 
         // Check if service is supported
-        use crate::service::ConfirmedServiceChoice;
-        let service = match service_choice {
-            6 => ConfirmedServiceChoice::AtomicReadFile,
-            7 => ConfirmedServiceChoice::AtomicWriteFile,
-            12 => ConfirmedServiceChoice::ReadProperty,
-            15 => ConfirmedServiceChoice::WriteProperty,
-            14 => ConfirmedServiceChoice::ReadPropertyMultiple,
-            5 => ConfirmedServiceChoice::SubscribeCOV,
-            _ => {
-                return Ok(Some(Apdu::Reject {
-                    invoke_id,
-                    reject_reason: RejectReason::UnrecognizedService as u8,
-                }));
-            }
-        };
-
-        if !self.supported_services.confirmed.contains(&service) {
+        if !self.supported_services.confirmed.contains(&service_choice) {
             return Ok(Some(Apdu::Reject {
                 invoke_id,
                 reject_reason: RejectReason::UnrecognizedService as u8,
@@ -1278,7 +1265,7 @@ impl ApplicationLayerHandler {
         }
 
         // Process based on service type
-        match service {
+        match service_choice {
             ConfirmedServiceChoice::ReadProperty => {
                 if let Some(ref processor) = self.service_processors.read_property {
                     match processor(service_data) {
@@ -1288,13 +1275,13 @@ impl ApplicationLayerHandler {
                             invoke_id,
                             sequence_number: None,
                             proposed_window_size: None,
-                            service_choice,
+                            service_choice: service_choice as u8,
                             service_data: response_data,
                         })),
                         Err(_) => {
                             Ok(Some(Apdu::Error {
                                 invoke_id,
-                                service_choice,
+                                service_choice: service_choice as u8,
                                 error_class: 0, // Object
                                 error_code: 0,  // Unknown object
                             }))
@@ -1758,7 +1745,7 @@ mod tests {
             invoke_id: 123,
             sequence_number: None,
             proposed_window_size: None,
-            service_choice: 12, // ReadProperty
+            service_choice: ConfirmedServiceChoice::ReadProperty,
             service_data: vec![0x0C, 0x02, 0x00, 0x00, 0x08, 0x19, 0x55],
         };
 
@@ -1773,7 +1760,7 @@ mod tests {
                 ..
             } => {
                 assert_eq!(invoke_id, 123);
-                assert_eq!(service_choice, 12);
+                assert_eq!(service_choice, ConfirmedServiceChoice::ReadProperty);
                 assert_eq!(segmented_response_accepted, true);
             }
             _ => panic!("Expected ConfirmedRequest"),
