@@ -5,7 +5,7 @@
 
 #[cfg(feature = "std")]
 use std::{
-    net::{SocketAddr, UdpSocket},
+    net::SocketAddr,
     time::{Duration, Instant},
 };
 
@@ -14,18 +14,20 @@ use alloc::{collections::BTreeMap as HashMap, string::String, vec::Vec};
 
 use crate::{
     app::{Apdu, MaxApduSize, MaxSegments},
+    datalink::bip::BacnetIpDataLink,
     network::Npdu,
     object::{ObjectIdentifier, ObjectType},
     service::{
         ConfirmedServiceChoice, IAmRequest, PropertyReference, ReadAccessSpecification,
         ReadPropertyMultipleRequest, UnconfirmedServiceChoice, WhoIsRequest,
     },
+    DataLink, DataLinkAddress,
 };
 
 /// High-level BACnet client for device communication
 #[cfg(feature = "std")]
 pub struct BacnetClient {
-    socket: UdpSocket,
+    datalink: BacnetIpDataLink,
     timeout: Duration,
 }
 
@@ -67,18 +69,17 @@ pub enum PropertyValue {
 impl BacnetClient {
     /// Create a new BACnet client
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let socket = UdpSocket::bind("0.0.0.0:0")?;
-        socket.set_read_timeout(Some(Duration::from_secs(5)))?;
+        let datalink = BacnetIpDataLink::new("0.0.0.0:0")?;
 
         Ok(Self {
-            socket,
+            datalink,
             timeout: Duration::from_secs(5),
         })
     }
 
     /// Discover a device by IP address
     pub fn discover_device(
-        &self,
+        &mut self,
         target_addr: SocketAddr,
     ) -> Result<DeviceInfo, Box<dyn std::error::Error>> {
         // Send Who-Is request
@@ -87,26 +88,21 @@ impl BacnetClient {
         whois.encode(&mut buffer)?;
 
         // Create and send message
-        let message =
-            self.create_unconfirmed_message(UnconfirmedServiceChoice::WhoIs as u8, &buffer);
-        self.socket.send_to(&message, target_addr)?;
+        let message = self.create_unconfirmed_message(UnconfirmedServiceChoice::WhoIs, &buffer);
+        self.datalink.send_unicast_npdu(&message, target_addr)?;
 
         // Wait for I-Am response
-        let mut recv_buffer = [0u8; 1500];
         let start_time = Instant::now();
 
         while start_time.elapsed() < self.timeout {
-            match self.socket.recv_from(&mut recv_buffer) {
-                Ok((len, source)) => {
-                    if source == target_addr {
-                        if let Some(device_info) =
-                            self.parse_iam_response(&recv_buffer[..len], source)
-                        {
+            match self.datalink.receive_frame() {
+                Ok((npdu, source)) => {
+                    if source == DataLinkAddress::Ip(target_addr) {
+                        if let Some(device_info) = self.parse_iam_response(&npdu, target_addr) {
                             return Ok(device_info);
                         }
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
                 Err(e) => return Err(e.into()),
             }
         }
@@ -116,7 +112,7 @@ impl BacnetClient {
 
     /// Read the device's object list
     pub fn read_object_list(
-        &self,
+        &mut self,
         target_addr: SocketAddr,
         device_id: u32,
     ) -> Result<Vec<ObjectIdentifier>, Box<dyn std::error::Error>> {
@@ -129,7 +125,7 @@ impl BacnetClient {
         let response_data = self.send_confirmed_request(
             target_addr,
             invoke_id,
-            ConfirmedServiceChoice::ReadPropertyMultiple as u8,
+            ConfirmedServiceChoice::ReadPropertyMultiple,
             &self.encode_rpm_request(&rpm_request)?,
         )?;
 
@@ -138,7 +134,7 @@ impl BacnetClient {
 
     /// Read properties for multiple objects
     pub fn read_objects_properties(
-        &self,
+        &mut self,
         target_addr: SocketAddr,
         objects: &[ObjectIdentifier],
     ) -> Result<Vec<ObjectInfo>, Box<dyn std::error::Error>> {
@@ -191,7 +187,7 @@ impl BacnetClient {
             match self.send_confirmed_request(
                 target_addr,
                 invoke_id,
-                ConfirmedServiceChoice::ReadPropertyMultiple as u8,
+                ConfirmedServiceChoice::ReadPropertyMultiple,
                 &self.encode_rpm_request(&rpm_request)?,
             ) {
                 Ok(response_data) => {
@@ -235,42 +231,42 @@ impl BacnetClient {
     }
 
     /// Create an unconfirmed message
-    fn create_unconfirmed_message(&self, service_choice: u8, service_data: &[u8]) -> Vec<u8> {
+    fn create_unconfirmed_message(
+        &self,
+        service_choice: UnconfirmedServiceChoice,
+        service_data: &[u8],
+    ) -> Vec<u8> {
         // Create NPDU
         let mut npdu = Npdu::new();
         npdu.control.expecting_reply = false;
         npdu.control.priority = 0;
-        let npdu_buffer = npdu.encode();
+        let mut message = npdu.encode();
 
         // Create unconfirmed service request APDU
-        let mut apdu = vec![0x10]; // Unconfirmed-Request PDU type
-        apdu.push(service_choice);
-        apdu.extend_from_slice(service_data);
+        let apdu = Apdu::UnconfirmedRequest {
+            service_choice,
+            service_data: service_data.to_owned(),
+        };
 
         // Combine NPDU and APDU
-        let mut message = npdu_buffer;
-        message.extend_from_slice(&apdu);
+        message.extend_from_slice(&apdu.encode());
 
-        // Wrap in BVLC header for BACnet/IP (unicast)
-        let mut bvlc_message = vec![0x81, 0x0A, 0x00, 0x00];
-        bvlc_message.extend_from_slice(&message);
-
-        // Update BVLC length
-        let total_len = bvlc_message.len() as u16;
-        bvlc_message[2] = (total_len >> 8) as u8;
-        bvlc_message[3] = (total_len & 0xFF) as u8;
-
-        bvlc_message
+        message
     }
 
     /// Send a confirmed request and wait for response
     fn send_confirmed_request(
-        &self,
+        &mut self,
         target_addr: SocketAddr,
         invoke_id: u8,
-        service_choice: u8,
+        service_choice: ConfirmedServiceChoice,
         service_data: &[u8],
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let mut npdu = Npdu::new();
+        npdu.control.expecting_reply = true;
+        npdu.control.priority = 0;
+        let mut message = npdu.encode();
+
         let apdu = Apdu::ConfirmedRequest {
             segmented: false,
             more_follows: false,
@@ -284,40 +280,24 @@ impl BacnetClient {
             service_data: service_data.to_vec(),
         };
 
-        let apdu_data = apdu.encode();
-        let mut npdu = Npdu::new();
-        npdu.control.expecting_reply = true;
-        npdu.control.priority = 0;
-        let npdu_data = npdu.encode();
+        message.extend_from_slice(&apdu.encode());
 
-        let mut message = npdu_data;
-        message.extend_from_slice(&apdu_data);
-
-        let mut bvlc_message = vec![0x81, 0x0A, 0x00, 0x00];
-        bvlc_message.extend_from_slice(&message);
-
-        let total_len = bvlc_message.len() as u16;
-        bvlc_message[2] = (total_len >> 8) as u8;
-        bvlc_message[3] = (total_len & 0xFF) as u8;
-
-        self.socket.send_to(&bvlc_message, target_addr)?;
+        self.datalink.send_unicast_npdu(&message, target_addr)?;
 
         // Wait for response
-        let mut recv_buffer = [0u8; 1500];
         let start_time = Instant::now();
 
         while start_time.elapsed() < self.timeout {
-            match self.socket.recv_from(&mut recv_buffer) {
-                Ok((len, source)) => {
-                    if source == target_addr {
+            match self.datalink.receive_frame() {
+                Ok((npdu, source)) => {
+                    if source == DataLinkAddress::Ip(target_addr) {
                         if let Some(response_data) =
-                            self.process_confirmed_response(&recv_buffer[..len], invoke_id)
+                            self.process_confirmed_response(&npdu, invoke_id)
                         {
                             return Ok(response_data);
                         }
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
                 Err(e) => return Err(e.into()),
             }
         }
@@ -327,22 +307,10 @@ impl BacnetClient {
 
     /// Parse I-Am response
     fn parse_iam_response(&self, data: &[u8], source: SocketAddr) -> Option<DeviceInfo> {
-        // Check BVLC header
-        if data.len() < 4 || data[0] != 0x81 {
-            return None;
-        }
-
-        let bvlc_length = ((data[2] as u16) << 8) | (data[3] as u16);
-        if data.len() != bvlc_length as usize {
-            return None;
-        }
-
-        // Decode NPDU
-        let npdu_start = 4;
-        let (_npdu, npdu_len) = Npdu::decode(&data[npdu_start..]).ok()?;
+        let (_npdu, npdu_len) = Npdu::decode(&data).ok()?;
 
         // Decode APDU
-        let apdu_start = npdu_start + npdu_len;
+        let apdu_start = npdu_len;
         let apdu = Apdu::decode(&data[apdu_start..]).ok()?;
 
         match apdu {

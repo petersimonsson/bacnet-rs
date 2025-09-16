@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("===========================================\n");
 
     // Create BACnet client
-    let client = BacnetClient::new()?;
+    let mut client = BacnetClient::new()?;
     println!("Created BACnet client");
 
     // Discover device
