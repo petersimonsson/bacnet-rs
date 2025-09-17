@@ -25,7 +25,7 @@
 //! let mut client = BacnetClient::new()?;
 //!
 //! // Discover devices on the network
-//! let devices = client.who_is_scan(std::time::Duration::from_secs(5)).await?;
+//! let devices = client.who_is_scan()?;
 //! println!("Found {} devices", devices.len());
 //!
 //! // Read a property from a device

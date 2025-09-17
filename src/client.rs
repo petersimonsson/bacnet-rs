@@ -230,6 +230,36 @@ impl BacnetClient {
         Ok(objects_info)
     }
 
+    pub fn who_is_scan(&mut self) -> Result<Vec<DeviceInfo>, Box<dyn std::error::Error>> {
+        // Send Who-Is request
+        let whois = WhoIsRequest::new();
+        let mut buffer = Vec::new();
+        whois.encode(&mut buffer)?;
+
+        // Create and send message
+        let message = self.create_unconfirmed_message(UnconfirmedServiceChoice::WhoIs, &buffer);
+        self.datalink.send_broadcast_npdu(&message)?;
+
+        // Wait for I-Am response
+        let start_time = Instant::now();
+        let mut devices = Vec::new();
+
+        while start_time.elapsed() < self.timeout {
+            match self.datalink.receive_frame() {
+                Ok((npdu, source)) => {
+                    if let DataLinkAddress::Ip(source) = source {
+                        if let Some(device_info) = self.parse_iam_response(&npdu, source) {
+                            devices.push(device_info);
+                        }
+                    }
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        Ok(devices)
+    }
+
     /// Create an unconfirmed message
     fn create_unconfirmed_message(
         &self,
