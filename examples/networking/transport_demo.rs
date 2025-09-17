@@ -92,9 +92,11 @@ fn demo_bacnet_ip_transport() -> Result<(), Box<dyn std::error::Error>> {
     println!("  BDT entries: {}", config.bdt.len());
 
     // Demonstrate configuration
-    let mut custom_config = BacnetIpConfig::default();
-    custom_config.buffer_size = 2048;
-    custom_config.broadcast_enabled = true;
+    let custom_config = BacnetIpConfig {
+        buffer_size: 2048,
+        broadcast_enabled: true,
+        ..Default::default()
+    };
 
     println!("  Custom config buffer size: {}", custom_config.buffer_size);
 
@@ -157,7 +159,7 @@ fn demo_broadcast_management() -> Result<(), Box<dyn std::error::Error>> {
     let mut manager = BroadcastManager::new();
 
     // Add some BDT entries
-    let entries = vec![
+    let entries = [
         BdtEntry {
             address: "192.168.1.255".parse()?,
             port: 47808,

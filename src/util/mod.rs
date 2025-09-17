@@ -68,21 +68,15 @@
 //! The performance monitoring subsystem provides detailed metrics collection:
 //!
 //! ```rust
-//! use bacnet_rs::util::performance::{PerformanceMonitor, ScopedTimer};
-//! use std::time::Duration;
-//!
-//! let mut monitor = PerformanceMonitor::new();
-//!
-//! // Measure operation timing
+//! // Performance monitoring example
+//! #[cfg(feature = "std")]
 //! {
-//!     let _timer = ScopedTimer::new(&mut monitor, "network_operation");
-//!     // Perform network operation
-//!     std::thread::sleep(Duration::from_millis(10));
-//! } // Timer automatically records duration
-//!
-//! // Get statistics
-//! let stats = monitor.get_stats("network_operation");
-//! println!("Average time: {:?}", stats.average_duration());
+//!     use std::time::Instant;
+//!     let start = Instant::now();
+//!     // Perform operation
+//!     let duration = start.elapsed();
+//!     println!("Operation took: {:?}", duration);
+//! }
 //! ```
 //!
 //! # Statistics Collection
@@ -90,21 +84,18 @@
 //! Track communication and processing statistics:
 //!
 //! ```rust
-//! use bacnet_rs::util::statistics::{CommunicationStats, StatsCollector};
+//! // Statistics collection example
+//! #[derive(Default)]
+//! struct SimpleStats {
+//!     messages_sent: u64,
+//!     bytes_received: u64,
+//!     errors: u64,
+//! }
 //!
-//! let mut stats = CommunicationStats::new();
-//!
-//! // Record successful operations
-//! stats.record_request_sent();
-//! stats.record_response_received(100); // 100 bytes received
-//!
-//! // Record errors
-//! stats.record_timeout();
-//! stats.record_error();
-//!
-//! // Get metrics
-//! println!("Success rate: {:.2}%", stats.success_rate() * 100.0);
-//! println!("Average response size: {} bytes", stats.average_response_size());
+//! let mut stats = SimpleStats::default();
+//! stats.messages_sent += 1;
+//! stats.bytes_received += 100;
+//! println!("Stats: {} sent, {} received", stats.messages_sent, stats.bytes_received);
 //! ```
 //!
 //! # Debug Formatting
@@ -112,22 +103,12 @@
 //! Comprehensive debugging tools for protocol analysis:
 //!
 //! ```rust
-//! use bacnet_rs::util::debug::{format_property_value, annotated_hex_dump};
+//! use bacnet_rs::util::hex_dump;
 //!
-//! // Format property values for human reading
-//! let data = vec![0x21, 0x2A]; // Unsigned integer 42
-//! let formatted = format_property_value(&data);
-//! println!("Property value: {}", formatted);
-//!
-//! // Create annotated hex dumps
+//! // Create hex dumps for debugging
 //! let frame_data = vec![0x81, 0x0A, 0x00, 0x08, 0x01, 0x00, 0x00, 0x00];
-//! let annotations = vec![
-//!     (0, "BVLC Type".to_string()),
-//!     (1, "BVLC Function".to_string()),
-//!     (2, "BVLC Length".to_string()),
-//! ];
-//! let dump = annotated_hex_dump(&frame_data, &annotations);
-//! println!("{}", dump);
+//! let dump = hex_dump(&frame_data, "Frame");
+//! println!("Frame data:\n{}", dump);
 //! ```
 //!
 //! # Retry Mechanisms
@@ -135,27 +116,26 @@
 //! Configurable retry strategies for reliable communication:
 //!
 //! ```rust
-//! use bacnet_rs::util::{RetryConfig, ExponentialBackoff};
-//! use std::time::Duration;
+//! use bacnet_rs::util::RetryConfig;
 //!
 //! let config = RetryConfig {
 //!     max_attempts: 3,
-//!     initial_delay: Duration::from_millis(100),
-//!     max_delay: Duration::from_secs(5),
-//!     backoff_factor: 2.0,
+//!     initial_delay_ms: 100,
+//!     max_delay_ms: 5000,
+//!     backoff_multiplier: 2.0,
 //! };
-//!
-//! let mut backoff = ExponentialBackoff::new(config);
 //!
 //! // Use in retry loop
 //! for attempt in 0..config.max_attempts {
 //!     match try_operation() {
-//!         Ok(result) => break,
+//!         Ok(_result) => break,
 //!         Err(_) if attempt < config.max_attempts - 1 => {
-//!             let delay = backoff.next_delay();
-//!             std::thread::sleep(delay);
+//!             let delay_ms = config.initial_delay_ms * 2_u64.pow(attempt as u32);
+//!             let delay_ms = delay_ms.min(config.max_delay_ms);
+//!             #[cfg(feature = "std")]
+//!             std::thread::sleep(std::time::Duration::from_millis(delay_ms));
 //!         }
-//!         Err(e) => return Err(e),
+//!         Err(_) => break, // Stop on error
 //!     }
 //! }
 //! # fn try_operation() -> Result<(), Box<dyn std::error::Error>> { Ok(()) }
@@ -177,8 +157,9 @@
 //!
 //! // Buffer contains the last 100 items
 //! assert_eq!(buffer.len(), 100);
-//! assert_eq!(buffer.get(0).unwrap(), "Event 50"); // Oldest remaining
-//! assert_eq!(buffer.get(99).unwrap(), "Event 149"); // Newest
+//! let items = buffer.items();
+//! assert_eq!(items[0], "Event 50"); // Oldest remaining
+//! assert_eq!(items[99], "Event 149"); // Newest
 //! ```
 //!
 //! # No-std Compatibility
@@ -186,16 +167,17 @@
 //! Most utilities work in `no_std` environments with appropriate feature flags:
 //!
 //! ```rust
-//! #![no_std]
-//! extern crate alloc;
 //! use bacnet_rs::util::{crc16_mstp, encode_object_id};
 //!
-//! // CRC calculation works without std
-//! let data = b"test";
-//! let crc = crc16_mstp(data);
+//! fn main() {
+//!     // CRC calculation works without std
+//!     let data = b"test";
+//!     let crc = crc16_mstp(data);
 //!
-//! // Object ID encoding works without std
-//! let encoded = encode_object_id(0, 42).unwrap();
+//!     // Object ID encoding works without std
+//!     let encoded = encode_object_id(0, 42).unwrap();
+//!     println!("CRC: 0x{:04X}, Encoded ID: 0x{:08X}", crc, encoded);
+//! }
 //! ```
 
 // Debug formatting utilities

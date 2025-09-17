@@ -47,18 +47,15 @@
 //! ## Encoding Basic Types
 //!
 //! ```rust
-//! use bacnet_rs::encoding::{encode_application_unsigned, encode_application_real, encode_application_boolean};
+//! use bacnet_rs::encoding::{encode_unsigned, encode_real, ApplicationTag};
 //!
 //! let mut buffer = Vec::new();
 //!
-//! // Encode an unsigned integer
-//! encode_application_unsigned(&mut buffer, 42).unwrap();
+//! // Encode an unsigned integer with application tag
+//! encode_unsigned(&mut buffer, 42).unwrap();
 //!
-//! // Encode a real number
-//! encode_application_real(&mut buffer, 23.5).unwrap();
-//!
-//! // Encode a boolean
-//! encode_application_boolean(&mut buffer, true).unwrap();
+//! // Encode a real number with application tag
+//! encode_real(&mut buffer, 23.5).unwrap();
 //!
 //! println!("Encoded {} bytes", buffer.len());
 //! ```
@@ -66,13 +63,13 @@
 //! ## Decoding Basic Types
 //!
 //! ```rust
-//! use bacnet_rs::encoding::{decode_application_unsigned, decode_application_real, ApplicationTag};
+//! use bacnet_rs::encoding::{decode_unsigned, ApplicationTag};
 //!
 //! // Sample encoded data (tag + value)
 //! let data = vec![0x21, 0x2A]; // Unsigned integer 42
 //!
 //! // Decode the value
-//! let (value, consumed) = decode_application_unsigned(&data).unwrap();
+//! let (value, consumed) = decode_unsigned(&data).unwrap();
 //! assert_eq!(value, 42);
 //! assert_eq!(consumed, 2);
 //! ```
@@ -80,11 +77,11 @@
 //! ## Working with Application Tags
 //!
 //! ```rust
-//! use bacnet_rs::encoding::{ApplicationTag, get_application_tag};
+//! use bacnet_rs::encoding::{ApplicationTag, decode_application_tag};
 //!
 //! let data = vec![0x21, 0x2A]; // Unsigned integer
-//! let tag = get_application_tag(&data).unwrap();
-//! assert_eq!(tag, ApplicationTag::UnsignedInteger);
+//! let (tag, length, consumed) = decode_application_tag(&data).unwrap();
+//! assert_eq!(tag, ApplicationTag::UnsignedInt);
 //! ```
 //!
 //! ## Context-Specific Encoding
@@ -92,10 +89,8 @@
 //! ```rust
 //! use bacnet_rs::encoding::{encode_context_unsigned, decode_context_unsigned};
 //!
-//! let mut buffer = Vec::new();
-//!
 //! // Encode with context tag 3
-//! encode_context_unsigned(&mut buffer, 3, 1000).unwrap();
+//! let buffer = encode_context_unsigned(1000, 3).unwrap();
 //!
 //! // Decode with expected context tag 3
 //! let (value, consumed) = decode_context_unsigned(&buffer, 3).unwrap();
@@ -112,12 +107,12 @@
 //! - **Length Error**: Incorrect length fields
 //!
 //! ```rust
-//! use bacnet_rs::encoding::{EncodingError, decode_application_unsigned};
+//! use bacnet_rs::encoding::{EncodingError, decode_unsigned};
 //!
 //! let invalid_data = vec![0x21]; // Missing value byte
-//! match decode_application_unsigned(&invalid_data) {
+//! match decode_unsigned(&invalid_data) {
 //!     Ok((value, _)) => println!("Value: {}", value),
-//!     Err(EncodingError::InsufficientData) => println!("Not enough data"),
+//!     Err(EncodingError::BufferUnderflow) => println!("Not enough data"),
 //!     Err(e) => println!("Other error: {:?}", e),
 //! }
 //! ```
@@ -2193,7 +2188,7 @@ mod tests {
     #[test]
     fn test_encode_decode_real() {
         let mut buffer = Vec::new();
-        let test_values = [0.0, 1.0, -1.0, 3.14159, -273.15, f32::MAX, f32::MIN];
+        let test_values = [0.0, 1.0, -1.0, std::f32::consts::PI, -273.15, f32::MAX, f32::MIN];
 
         for &test_value in &test_values {
             buffer.clear();
@@ -2280,7 +2275,7 @@ mod tests {
             0.0,
             1.0,
             -1.0,
-            3.141592653589793,
+            std::f64::consts::PI,
             -273.15,
             f64::MAX,
             f64::MIN,
@@ -2367,7 +2362,7 @@ mod tests {
         // Test fast encoding
         encoder.encode_unsigned_fast(42).unwrap();
         encoder.encode_boolean_fast(true).unwrap();
-        encoder.encode_real_fast(3.14159).unwrap();
+        encoder.encode_real_fast(std::f32::consts::PI).unwrap();
 
         let data = encoder.data();
         assert!(!data.is_empty());

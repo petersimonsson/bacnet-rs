@@ -26,6 +26,7 @@ struct BACnetDevice {
     network_number: u16,
     mac_address: Vec<u8>,
     socket_addr: SocketAddr,
+    #[allow(dead_code)]
     vendor_id: u32,
     vendor_name: String,
     max_apdu: u32,
@@ -91,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     discover_devices_global(&socket, &mut devices)?;
 
     // Then directed discovery for each known network
-    for (network, _) in &routers {
+    for network in routers.keys() {
         println!("🎯 Scanning network {}...", network);
         discover_devices_on_network(&socket, *network, &mut devices)?;
     }
@@ -160,27 +161,24 @@ fn discover_routers(
     let mut buffer = [0u8; 1500];
 
     while start.elapsed() < Duration::from_secs(3) {
-        match socket.recv_from(&mut buffer) {
-            Ok((len, src_addr)) => {
-                if len > 4 {
-                    let npdu_data = &buffer[4..len];
-                    if let Ok((npdu, offset)) = Npdu::decode(npdu_data) {
-                        if npdu.is_network_message()
-                            && npdu_data.len() > offset
-                            && npdu_data[offset] == 0x02
-                        {
-                            let mut idx = offset + 1;
-                            while idx + 1 < npdu_data.len() {
-                                let network =
-                                    u16::from_be_bytes([npdu_data[idx], npdu_data[idx + 1]]);
-                                routers.insert(network, src_addr);
-                                idx += 2;
-                            }
+        if let Ok((len, src_addr)) = socket.recv_from(&mut buffer) {
+            if len > 4 {
+                let npdu_data = &buffer[4..len];
+                if let Ok((npdu, offset)) = Npdu::decode(npdu_data) {
+                    if npdu.is_network_message()
+                        && npdu_data.len() > offset
+                        && npdu_data[offset] == 0x02
+                    {
+                        let mut idx = offset + 1;
+                        while idx + 1 < npdu_data.len() {
+                            let network =
+                                u16::from_be_bytes([npdu_data[idx], npdu_data[idx + 1]]);
+                            routers.insert(network, src_addr);
+                            idx += 2;
                         }
                     }
                 }
             }
-            Err(_) => {}
         }
     }
 
@@ -408,9 +406,9 @@ fn analyze_device(
                             .count() as f32
                             / cleaned_name.len().max(1) as f32;
 
-                        if printable_ratio > 0.7 && cleaned_name.len() > 0 {
+                        if printable_ratio > 0.7 && !cleaned_name.is_empty() {
                             device.objects[i].name = Some(cleaned_name);
-                        } else if cleaned_name.len() > 0
+                        } else if !cleaned_name.is_empty()
                             && cleaned_name
                                 .chars()
                                 .all(|c| c.is_ascii_graphic() || c == ' ')
@@ -501,13 +499,12 @@ fn read_device_property(
     let invoke_id = if invoke_id == 0 { 1 } else { invoke_id }; // Never use 0
 
     // Create ReadProperty request following the official BACnet C stack implementation
-    let mut apdu = Vec::new();
-
-    // APDU Header (4 bytes) - following rp_encode_apdu()
-    apdu.push(0x00); // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
-    apdu.push(0x05); // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
-    apdu.push(invoke_id); // invoke_id
-    apdu.push(0x0C); // SERVICE_CONFIRMED_READ_PROPERTY (12)
+    let mut apdu = vec![
+        0x00, // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
+        0x05, // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
+        invoke_id, // invoke_id
+        0x0C, // SERVICE_CONFIRMED_READ_PROPERTY (12)
+    ];
 
     // ReadProperty Service Data - following read_property_request_encode()
 
@@ -542,12 +539,7 @@ fn try_read_object_list_multiple_approaches(
     match read_property_with_array_index(socket, device, PropertyIdentifier::ObjectList as u32, 0) {
         Ok(length_response) => {
             // Parse the length - it might be a number like "84" or an encoded value
-            let length = if let Ok(len) = length_response.parse::<u32>() {
-                len
-            } else {
-                // Try to extract a number from the response
-                100 // Default max if we can't parse length
-            };
+            let length = length_response.parse::<u32>().unwrap_or(100);
 
             // Read each object identifier by array index
             for i in 1..=std::cmp::min(length, 1000) {
@@ -560,7 +552,6 @@ fn try_read_object_list_multiple_approaches(
                 ) {
                     Ok(obj_response) => {
                         // Parse different response formats
-                        let mut parsed = false;
 
                         // Format 1: "Object(type,instance)"
                         if let Some(captures) = obj_response
@@ -581,15 +572,13 @@ fn try_read_object_list_multiple_approaches(
                                             description: None,
                                         };
                                         device.objects.push(obj);
-                                        parsed = true;
                                     }
                                 }
                             }
                         }
 
                         // Format 2: "Objects: [TYPE:instance]"
-                        if !parsed
-                            && obj_response.starts_with("Objects: [")
+                        if obj_response.starts_with("Objects: [")
                             && obj_response.ends_with("]")
                         {
                             let objects_str = &obj_response[10..obj_response.len() - 1];
@@ -621,7 +610,6 @@ fn try_read_object_list_multiple_approaches(
                                             description: None,
                                         };
                                         device.objects.push(obj);
-                                        parsed = true;
                                     }
                                 }
                             }
@@ -652,6 +640,7 @@ fn try_read_object_list_multiple_approaches(
     read_object_list(socket, device)
 }
 
+#[allow(dead_code)]
 fn read_device_property_simple(
     socket: &UdpSocket,
     device: &BACnetDevice,
@@ -662,11 +651,12 @@ fn read_device_property_simple(
     let invoke_id = if invoke_id == 0 { 1 } else { invoke_id };
 
     // Simpler APDU construction
-    let mut apdu = Vec::new();
-    apdu.push(0x00); // Confirmed-Request
-    apdu.push(0x05); // Max segments/APDU
-    apdu.push(invoke_id);
-    apdu.push(0x0C); // ReadProperty
+    let mut apdu = vec![
+        0x00, // Confirmed-Request
+        0x05, // Max segments/APDU
+        invoke_id,
+        0x0C, // ReadProperty
+    ];
 
     // Object ID for device
     let obj_id = ((ObjectType::Device as u32) << 22) | (device.device_id & 0x3FFFFF);
@@ -680,6 +670,7 @@ fn read_device_property_simple(
     send_request_and_get_response(socket, device, &apdu, invoke_id)
 }
 
+#[allow(dead_code)]
 fn read_device_property_alternative(
     socket: &UdpSocket,
     device: &BACnetDevice,
@@ -690,11 +681,12 @@ fn read_device_property_alternative(
     let invoke_id = if invoke_id == 0 { 1 } else { invoke_id };
 
     // Alternative encoding - try different max APDU
-    let mut apdu = Vec::new();
-    apdu.push(0x00); // Confirmed-Request
-    apdu.push(0x00); // No segmentation, 50 byte APDU
-    apdu.push(invoke_id);
-    apdu.push(0x0C); // ReadProperty
+    let mut apdu = vec![
+        0x00, // Confirmed-Request
+        0x00, // No segmentation, 50 byte APDU
+        invoke_id,
+        0x0C, // ReadProperty
+    ];
 
     // Object ID for device
     let obj_id = ((ObjectType::Device as u32) << 22) | (device.device_id & 0x3FFFFF);
@@ -848,13 +840,12 @@ fn read_property_with_array_index(
     let invoke_id = if invoke_id == 0 { 1 } else { invoke_id }; // Never use 0
 
     // Create ReadProperty request following the official BACnet C stack implementation
-    let mut apdu = Vec::new();
-
-    // APDU Header (4 bytes) - following rp_encode_apdu()
-    apdu.push(0x00); // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
-    apdu.push(0x05); // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
-    apdu.push(invoke_id); // invoke_id
-    apdu.push(0x0C); // SERVICE_CONFIRMED_READ_PROPERTY (12)
+    let mut apdu = vec![
+        0x00, // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
+        0x05, // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
+        invoke_id, // invoke_id
+        0x0C, // SERVICE_CONFIRMED_READ_PROPERTY (12)
+    ];
 
     // ReadProperty Service Data - following read_property_request_encode()
 
@@ -904,11 +895,12 @@ fn read_object_property_simple(
     let invoke_id = if invoke_id == 0 { 1 } else { invoke_id };
 
     // Simple APDU construction for object properties
-    let mut apdu = Vec::new();
-    apdu.push(0x00); // Confirmed-Request
-    apdu.push(0x05); // Max segments/APDU
-    apdu.push(invoke_id);
-    apdu.push(0x0C); // ReadProperty
+    let mut apdu = vec![
+        0x00, // Confirmed-Request
+        0x05, // Max segments/APDU
+        invoke_id,
+        0x0C, // ReadProperty
+    ];
 
     // Object ID
     let obj_id = ((object.object_type as u32) << 22) | (object.instance & 0x3FFFFF);
@@ -922,6 +914,7 @@ fn read_object_property_simple(
     send_request_and_get_response(socket, device, &apdu, invoke_id)
 }
 
+#[allow(dead_code)]
 fn read_object_property(
     socket: &UdpSocket,
     device: &BACnetDevice,
@@ -933,13 +926,12 @@ fn read_object_property(
     let invoke_id = if invoke_id == 0 { 1 } else { invoke_id }; // Never use 0
 
     // Create ReadProperty request following the official BACnet C stack implementation
-    let mut apdu = Vec::new();
-
-    // APDU Header (4 bytes) - following rp_encode_apdu()
-    apdu.push(0x00); // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
-    apdu.push(0x05); // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
-    apdu.push(invoke_id); // invoke_id
-    apdu.push(0x0C); // SERVICE_CONFIRMED_READ_PROPERTY (12)
+    let mut apdu = vec![
+        0x00, // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
+        0x05, // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
+        invoke_id, // invoke_id
+        0x0C, // SERVICE_CONFIRMED_READ_PROPERTY (12)
+    ];
 
     // ReadProperty Service Data - following read_property_request_encode()
 
@@ -1023,7 +1015,7 @@ fn send_request_and_get_response(
                                         }
                                     }
                                     // Try to parse as raw property data
-                                    return parse_raw_response(&apdu_data);
+                                    return parse_raw_response(apdu_data);
                                 } else if pdu_type == 0x5 {
                                     // Error
                                     return Err("Device returned error".into());
@@ -1171,8 +1163,7 @@ fn parse_object_list_response(
     }
 
     // Try to parse as hex string
-    if data.starts_with("0x") {
-        let hex_str = &data[2..];
+    if let Some(hex_str) = data.strip_prefix("0x") {
         if let Ok(bytes) = decode_hex(hex_str) {
             return parse_object_list_from_bytes(&bytes);
         }
@@ -1230,8 +1221,7 @@ fn parse_object_identifiers_from_response(
     response: &str,
 ) -> Result<Vec<BACnetObjectId>, Box<dyn std::error::Error>> {
     // Handle hex-encoded response
-    if response.starts_with("0x") {
-        let hex_str = &response[2..];
+    if let Some(hex_str) = response.strip_prefix("0x") {
         if let Ok(bytes) = decode_hex(hex_str) {
             return parse_object_list_from_bytes(&bytes);
         }
@@ -1355,8 +1345,7 @@ fn decode_hex(hex_str: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
 
 fn parse_string_from_response(response: &str) -> Result<String, Box<dyn std::error::Error>> {
     // Handle hex response starting with 0x
-    if response.starts_with("0x") {
-        let hex_str = &response[2..];
+    if let Some(hex_str) = response.strip_prefix("0x") {
         if let Ok(bytes) = decode_hex(hex_str) {
             // Try multiple approaches to extract the string
 
@@ -1370,8 +1359,7 @@ fn parse_string_from_response(response: &str) -> Result<String, Box<dyn std::err
 
 fn parse_value_from_response(response: &str) -> Result<String, Box<dyn std::error::Error>> {
     // Handle hex response starting with 0x
-    if response.starts_with("0x") {
-        let hex_str = &response[2..];
+    if let Some(hex_str) = response.strip_prefix("0x") {
         if let Ok(bytes) = decode_hex(hex_str) {
             // Use universal BACnet decoder
             return decode_bacnet_value(&bytes);
@@ -1415,8 +1403,7 @@ fn decode_bacnet_value(data: &[u8]) -> Result<String, Box<dyn std::error::Error>
 
 fn parse_units_from_response(response: &str) -> Result<String, Box<dyn std::error::Error>> {
     // Handle hex response starting with 0x
-    if response.starts_with("0x") {
-        let hex_str = &response[2..];
+    if let Some(hex_str) = response.strip_prefix("0x") {
         if let Ok(bytes) = decode_hex(hex_str) {
             // Use universal decoder - units will be returned as enumerated values
             if let Ok(value) = decode_bacnet_value(&bytes) {
@@ -1516,7 +1503,7 @@ fn parse_bacnet_application_tag(data: &[u8]) -> Result<String, Box<dyn std::erro
                 value = (value << 8) | (byte as i64);
             }
             // Sign extend if necessary
-            if value_data.len() > 0 && value_data.len() < 8 && (value_data[0] & 0x80) != 0 {
+            if !value_data.is_empty() && value_data.len() < 8 && (value_data[0] & 0x80) != 0 {
                 let shift = 64 - (value_data.len() * 8);
                 value = (value << shift) >> shift;
             }
@@ -1566,7 +1553,7 @@ fn parse_bacnet_application_tag(data: &[u8]) -> Result<String, Box<dyn std::erro
         7 => {
             // Character String
             // First byte is character set
-            if value_data.len() > 0 {
+            if !value_data.is_empty() {
                 let charset = value_data[0];
                 let string_data = &value_data[1..];
                 match charset {
@@ -1617,7 +1604,7 @@ fn parse_bacnet_application_tag(data: &[u8]) -> Result<String, Box<dyn std::erro
         }
         8 => {
             // Bit String
-            if value_data.len() > 0 {
+            if !value_data.is_empty() {
                 let unused_bits = value_data[0];
                 let bit_data = &value_data[1..];
                 Ok(format!(

@@ -73,7 +73,7 @@
 //! // Property identifiers for common properties
 //! let present_value = PropertyIdentifier::PresentValue;
 //! let object_name = PropertyIdentifier::ObjectName;
-//! let units = PropertyIdentifier::Units;
+//! let units = PropertyIdentifier::OutputUnits;
 //!
 //! // Property values can represent different data types
 //! let temperature = PropertyValue::Real(23.5);
@@ -84,14 +84,19 @@
 //! ## Object Database Usage
 //!
 //! ```rust,no_run
-//! use bacnet_rs::object::{database::ObjectDatabase, ObjectIdentifier, ObjectType, PropertyIdentifier, PropertyValue};
+//! use bacnet_rs::object::{database::ObjectDatabase, ObjectIdentifier, ObjectType, PropertyIdentifier, PropertyValue, analog::AnalogInput, Device};
 //!
-//! // Create an object database
-//! let mut db = ObjectDatabase::new();
+//! // Create a device and object database
+//! let device = Device::new(12345, "BACnet Device".to_string());
+//! let mut db = ObjectDatabase::new(device);
 //!
-//! // Add an object
-//! let obj_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
-//! db.add_object(obj_id).expect("Failed to add object");
+//! // Create an analog input object
+//! let mut ai = AnalogInput::new(1, "Room Temperature".to_string());
+//! ai.set_present_value(23.5);
+//! let obj_id = ai.identifier;
+//!
+//! // Add the object to the database
+//! db.add_object(Box::new(ai)).expect("Failed to add object");
 //!
 //! // Set properties
 //! db.set_property(obj_id, PropertyIdentifier::ObjectName,

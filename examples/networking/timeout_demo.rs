@@ -91,11 +91,13 @@ fn demo_timeout_configuration() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Request timeout: {:?}", custom_config.request_timeout);
 
     // BACnet/IP transport with custom timeouts
-    let mut ip_config = BacnetIpConfig::default();
-    ip_config.read_timeout = Some(custom_config.read_timeout);
-    ip_config.write_timeout = Some(custom_config.write_timeout);
-    ip_config.request_timeout = custom_config.request_timeout;
-    ip_config.registration_timeout = custom_config.registration_timeout;
+    let ip_config = BacnetIpConfig {
+        read_timeout: Some(custom_config.read_timeout),
+        write_timeout: Some(custom_config.write_timeout),
+        request_timeout: custom_config.request_timeout,
+        registration_timeout: custom_config.registration_timeout,
+        ..Default::default()
+    };
 
     println!("\nBACnet/IP config with custom timeouts created");
     println!("  Socket read timeout: {:?}", ip_config.read_timeout);
@@ -110,10 +112,12 @@ fn demo_socket_timeouts() -> Result<(), Box<dyn std::error::Error>> {
     println!("===========================");
 
     // Create transport with short timeouts for demonstration
-    let mut config = BacnetIpConfig::default();
-    config.bind_address = "127.0.0.1:0".parse()?; // Use any available port
-    config.read_timeout = Some(Duration::from_millis(500));
-    config.write_timeout = Some(Duration::from_millis(500));
+    let config = BacnetIpConfig {
+        bind_address: "127.0.0.1:0".parse()?, // Use any available port
+        read_timeout: Some(Duration::from_millis(500)),
+        write_timeout: Some(Duration::from_millis(500)),
+        ..Default::default()
+    };
 
     let mut transport = BacnetIpTransport::new(config)?;
     let local_addr = transport.local_address()?;

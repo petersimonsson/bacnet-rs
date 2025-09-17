@@ -18,28 +18,24 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use bacnet_rs::{client::BacnetClient, object::ObjectIdentifier, ObjectType};
+//! use bacnet_rs::client::BacnetClient;
+//! use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 //!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // Create a BACnet client
-//! let mut client = BacnetClient::new("0.0.0.0:47808").await?;
+//! fn example() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Create a BACnet client
+//!     let client = BacnetClient::new()?;
 //!
-//! // Discover devices on the network
-//! let devices = client.who_is_scan(std::time::Duration::from_secs(5)).await?;
-//! println!("Found {} devices", devices.len());
+//!     // Discover a device at a specific address
+//!     let target_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)), 47808);
+//!     let device = client.discover_device(target_addr)?;
+//!     println!("Found device: {}", device.vendor_name);
 //!
-//! // Read a property from a device
-//! if let Some(device) = devices.first() {
-//!     let object_id = ObjectIdentifier::new(ObjectType::Device, device.instance);
-//!     let name = client.read_property_string(
-//!         device.address.clone(),
-//!         object_id,
-//!         bacnet_rs::object::PropertyIdentifier::ObjectName
-//!     ).await?;
-//!     println!("Device name: {}", name);
+//!     // Read object list from the device
+//!     let objects = client.read_object_list(target_addr, device.device_id)?;
+//!     println!("Device has {} objects", objects.len());
+//!
+//!     Ok(())
 //! }
-//! # Ok(())
-//! # }
 //! ```
 //!
 //! ## Architecture

@@ -6,7 +6,7 @@
 use bacnet_rs::util::{
     self, calculate_throughput, format_bytes,
     performance::{PerformanceMonitor, ScopedTimer},
-    statistics::{CommunicationStats, DeviceStats, StatsCollector},
+    statistics::StatsCollector,
     CircularBuffer, RetryConfig,
 };
 use std::{

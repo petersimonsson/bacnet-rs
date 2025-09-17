@@ -91,7 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Unconfirmed request (Who-Is)
     let whois_apdu = Apdu::UnconfirmedRequest {
-        service_choice: UnconfirmedServiceChoice::WhoIs,
+        service_choice: UnconfirmedServiceChoice::WhoIs as u8,
         service_data: whois_buffer,
     };
 
@@ -101,7 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let decoded_apdu = Apdu::decode(&encoded_apdu)?;
     match decoded_apdu {
         Apdu::UnconfirmedRequest { service_choice, .. } => {
-            println!("Decoded APDU service choice: {}", service_choice as u8);
+            println!("Decoded APDU service choice: {}", service_choice);
         }
         _ => println!("Unexpected APDU type"),
     }

@@ -171,7 +171,7 @@ fn create_iam_response(
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     // Create I-Am request
     let iam = IAmRequest::new(
-        device.identifier.clone(),
+        device.identifier,
         1476, // Max APDU length
         0,    // Segmentation: both
         device.vendor_identifier as u32,

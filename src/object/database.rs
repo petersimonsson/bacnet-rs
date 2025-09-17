@@ -345,13 +345,6 @@ pub struct DatabaseBuilder {
 }
 
 #[cfg(feature = "std")]
-impl Default for DatabaseBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(feature = "std")]
 impl DatabaseBuilder {
     /// Create a new database builder
     pub fn new() -> Self {

@@ -52,11 +52,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         test_object.instance
     );
 
-    let mut property_refs = Vec::new();
-    property_refs.push(PropertyReference::new(77)); // Object_Name
-    property_refs.push(PropertyReference::new(28)); // Description
-    property_refs.push(PropertyReference::new(85)); // Present_Value
-    property_refs.push(PropertyReference::new(117)); // Units
+    let property_refs = vec![
+        PropertyReference::new(77), // Object_Name
+        PropertyReference::new(28), // Description
+        PropertyReference::new(85), // Present_Value
+        PropertyReference::new(117), // Units
+    ];
 
     let read_spec = ReadAccessSpecification::new(test_object, property_refs);
     let rpm_request = ReadPropertyMultipleRequest::new(vec![read_spec]);

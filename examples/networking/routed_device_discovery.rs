@@ -6,8 +6,8 @@
 use bacnet_rs::{
     datalink::bip::{BvlcFunction, BvlcHeader},
     network::{NetworkAddress, Npdu},
-    object::{ObjectIdentifier, ObjectType, PropertyIdentifier},
-    service::{IAmRequest, ReadPropertyRequest, ReadPropertyResponse, WhoIsRequest},
+    object::{ObjectType, PropertyIdentifier},
+    service::{IAmRequest, ReadPropertyResponse, WhoIsRequest},
     vendor::get_vendor_name,
 };
 use std::{
@@ -90,7 +90,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     discover_devices_global(&socket, &mut devices)?;
 
     // Then try directed discovery for each known network
-    for (network, _) in &routers {
+    for network in routers.keys() {
         discover_devices_on_network(&socket, *network, &mut devices)?;
     }
 
@@ -453,14 +453,13 @@ fn read_device_properties(socket: &UdpSocket, device: &mut RemoteDevice) {
 
                 // Read Present Value if it's an I/O object
                 if is_io_object(obj_id.object_type) {
-                    match read_object_property(
+                    if let Ok(value) = read_object_property(
                         socket,
                         device,
                         obj_id,
                         PropertyIdentifier::PresentValue as u32,
                     ) {
-                        Ok(value) => println!("      Present Value: {}", value),
-                        Err(_) => {} // Many objects don't have present value
+                        println!("      Present Value: {}", value);
                     }
                 }
 
@@ -487,13 +486,12 @@ fn read_property(
     // Create ReadProperty request following the official BACnet C stack implementation
     // Reference: bacnet-stack/src/bacnet/rp.c
 
-    let mut apdu = Vec::new();
-
-    // APDU Header (4 bytes) - following rp_encode_apdu()
-    apdu.push(0x00); // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
-    apdu.push(0x05); // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
-    apdu.push(invoke_id); // invoke_id
-    apdu.push(0x0C); // SERVICE_CONFIRMED_READ_PROPERTY (12)
+    let mut apdu = vec![
+        0x00, // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
+        0x05, // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
+        invoke_id, // invoke_id
+        0x0C, // SERVICE_CONFIRMED_READ_PROPERTY (12)
+    ];
 
     // ReadProperty Service Data - following read_property_request_encode()
 
@@ -781,7 +779,7 @@ fn read_object_list(
 ) -> Result<Vec<BACnetObjectId>, Box<dyn std::error::Error>> {
     // Read Object-List property (property ID 76)
     match read_property(socket, device, PropertyIdentifier::ObjectList as u32) {
-        Ok(raw_data) => {
+        Ok(_raw_data) => {
             // The Object-List is typically too large to read at once, so we might get an error
             // Let's try reading it with array indices
             read_object_list_with_indices(socket, device)
@@ -864,13 +862,12 @@ fn read_object_property(
     let invoke_id = INVOKE_ID.fetch_add(1, Ordering::SeqCst);
     let invoke_id = if invoke_id == 0 { 101 } else { invoke_id };
 
-    let mut apdu = Vec::new();
-
-    // APDU Header (4 bytes)
-    apdu.push(0x00); // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
-    apdu.push(0x05); // encode_max_segs_max_apdu(0, MAX_APDU)
-    apdu.push(invoke_id); // invoke_id
-    apdu.push(0x0C); // SERVICE_CONFIRMED_READ_PROPERTY
+    let mut apdu = vec![
+        0x00, // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
+        0x05, // encode_max_segs_max_apdu(0, MAX_APDU)
+        invoke_id, // invoke_id
+        0x0C, // SERVICE_CONFIRMED_READ_PROPERTY
+    ];
 
     // ReadProperty Service Data
     // Context tag 0: Object Identifier
@@ -930,15 +927,13 @@ fn read_object_property(
                             let pdu_type = (apdu_data[0] & 0xF0) >> 4;
                             let resp_invoke_id = apdu_data[0] & 0x0F;
 
-                            if resp_invoke_id == (invoke_id & 0x0F) && pdu_type == 0x3 {
-                                if apdu_data.len() >= 2 && apdu_data[1] == 0x0C {
-                                    if let Ok(response) =
-                                        ReadPropertyResponse::decode(&apdu_data[2..])
-                                    {
-                                        return extract_string_value(&response.property_value);
-                                    } else {
-                                        return parse_read_property_ack_manual(&apdu_data[2..]);
-                                    }
+                            if resp_invoke_id == (invoke_id & 0x0F) && pdu_type == 0x3 && apdu_data.len() >= 2 && apdu_data[1] == 0x0C {
+                                if let Ok(response) =
+                                    ReadPropertyResponse::decode(&apdu_data[2..])
+                                {
+                                    return extract_string_value(&response.property_value);
+                                } else {
+                                    return parse_read_property_ack_manual(&apdu_data[2..]);
                                 }
                             }
                         }
@@ -965,13 +960,12 @@ fn read_property_with_array_index(
     let invoke_id = INVOKE_ID.fetch_add(1, Ordering::SeqCst);
     let invoke_id = if invoke_id == 0 { 201 } else { invoke_id };
 
-    let mut apdu = Vec::new();
-
-    // APDU Header (4 bytes)
-    apdu.push(0x00); // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
-    apdu.push(0x05); // encode_max_segs_max_apdu(0, MAX_APDU)
-    apdu.push(invoke_id); // invoke_id
-    apdu.push(0x0C); // SERVICE_CONFIRMED_READ_PROPERTY
+    let mut apdu = vec![
+        0x00, // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
+        0x05, // encode_max_segs_max_apdu(0, MAX_APDU)
+        invoke_id, // invoke_id
+        0x0C, // SERVICE_CONFIRMED_READ_PROPERTY
+    ];
 
     // ReadProperty Service Data
     // Context tag 0: Object Identifier (Device)
@@ -1035,15 +1029,13 @@ fn read_property_with_array_index(
                             let pdu_type = (apdu_data[0] & 0xF0) >> 4;
                             let resp_invoke_id = apdu_data[0] & 0x0F;
 
-                            if resp_invoke_id == (invoke_id & 0x0F) && pdu_type == 0x3 {
-                                if apdu_data.len() >= 2 && apdu_data[1] == 0x0C {
-                                    if let Ok(response) =
-                                        ReadPropertyResponse::decode(&apdu_data[2..])
-                                    {
-                                        return extract_string_value(&response.property_value);
-                                    } else {
-                                        return parse_read_property_ack_manual(&apdu_data[2..]);
-                                    }
+                            if resp_invoke_id == (invoke_id & 0x0F) && pdu_type == 0x3 && apdu_data.len() >= 2 && apdu_data[1] == 0x0C {
+                                if let Ok(response) =
+                                    ReadPropertyResponse::decode(&apdu_data[2..])
+                                {
+                                    return extract_string_value(&response.property_value);
+                                } else {
+                                    return parse_read_property_ack_manual(&apdu_data[2..]);
                                 }
                             }
                         }

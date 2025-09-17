@@ -77,9 +77,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for addr_str in &local_broadcasts {
         if let Ok(addr) = addr_str.parse::<SocketAddr>() {
-            match datalink.send_frame(&message, &DataLinkAddress::Ip(addr)) {
-                Ok(_) => println!("Sent Who-Is to local broadcast: {}", addr),
-                Err(_) => {} // Ignore errors for unreachable broadcasts
+            if datalink.send_frame(&message, &DataLinkAddress::Ip(addr)).is_ok() {
+                println!("Sent Who-Is to local broadcast: {}", addr);
             }
         }
     }
@@ -98,10 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Re-broadcast every 2 seconds
         if last_broadcast.elapsed() > Duration::from_secs(2) {
             println!("Sending periodic Who-Is broadcast...");
-            match datalink.send_frame(&message, &DataLinkAddress::Broadcast) {
-                Ok(_) => {}
-                Err(_) => {}
-            }
+            let _ = datalink.send_frame(&message, &DataLinkAddress::Broadcast);
             last_broadcast = Instant::now();
         }
 
@@ -118,7 +114,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // Process the received message
                 if let Some(device) = process_response(&data, source_addr) {
-                    if !discovered_devices.contains_key(&device.device_id) {
+                    if let std::collections::hash_map::Entry::Vacant(e) = discovered_devices.entry(device.device_id) {
                         println!("Discovered new device:");
                         println!("  Device ID: {}", device.device_id);
                         println!("  Address: {}", device.address);
@@ -139,7 +135,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         );
                         println!();
 
-                        discovered_devices.insert(device.device_id, device);
+                        e.insert(device);
                     }
                 }
             }
@@ -202,7 +198,7 @@ fn process_response(data: &[u8], source: SocketAddr) -> Option<DiscoveredDevice>
     }
 
     // Decode NPDU starting from the beginning of the data
-    let (_npdu, npdu_len) = match Npdu::decode(&data) {
+    let (_npdu, npdu_len) = match Npdu::decode(data) {
         Ok(result) => result,
         Err(e) => {
             println!("  Failed to decode NPDU: {:?}", e);

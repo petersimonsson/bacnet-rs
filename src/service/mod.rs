@@ -85,58 +85,47 @@
 //! ## Reading a Property
 //!
 //! ```rust
-//! use bacnet_rs::service::{ConfirmedServiceChoice, ReadPropertyService};
+//! use bacnet_rs::service::{ConfirmedServiceChoice, ReadPropertyRequest};
 //! use bacnet_rs::object::{ObjectIdentifier, ObjectType, PropertyIdentifier};
 //!
 //! // Create a read property request
 //! let object_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
-//! let request = ReadPropertyService {
-//!     object_identifier: object_id,
-//!     property_identifier: PropertyIdentifier::PresentValue,
-//!     property_array_index: None,
-//! };
+//! let request = ReadPropertyRequest::new(object_id, PropertyIdentifier::PresentValue as u32);
 //!
 //! // This would be sent as a confirmed service
-//! let service = ConfirmedServiceChoice::ReadProperty(request);
+//! let service_choice = ConfirmedServiceChoice::ReadProperty;
 //! ```
 //!
 //! ## Device Discovery
 //!
 //! ```rust
-//! use bacnet_rs::service::{UnconfirmedServiceChoice, WhoIsService};
+//! use bacnet_rs::service::{UnconfirmedServiceChoice, WhoIsRequest};
 //!
 //! // Create a Who-Is request to discover all devices
-//! let who_is = WhoIsService {
-//!     device_instance_range_low_limit: None,
-//!     device_instance_range_high_limit: None,
-//! };
+//! let who_is = WhoIsRequest::new();
 //!
 //! // This would be sent as an unconfirmed service
-//! let service = UnconfirmedServiceChoice::WhoIs(who_is);
+//! let service_choice = UnconfirmedServiceChoice::WhoIs;
 //! ```
 //!
 //! ## Reading Multiple Properties
 //!
 //! ```rust
-//! use bacnet_rs::service::{ConfirmedServiceChoice, ReadPropertyMultipleService, ReadAccessSpecification};
+//! use bacnet_rs::service::{ConfirmedServiceChoice, ReadPropertyMultipleRequest, ReadAccessSpecification, PropertyReference};
 //! use bacnet_rs::object::{ObjectIdentifier, ObjectType, PropertyIdentifier};
 //!
 //! // Create a read property multiple request
 //! let object_id = ObjectIdentifier::new(ObjectType::Device, 12345);
-//! let spec = ReadAccessSpecification {
-//!     object_identifier: object_id,
-//!     list_of_property_references: vec![
-//!         PropertyIdentifier::ObjectName,
-//!         PropertyIdentifier::ModelName,
-//!         PropertyIdentifier::VendorName,
-//!     ],
-//! };
+//! let property_refs = vec![
+//!     PropertyReference::new(PropertyIdentifier::ObjectName as u32),
+//!     PropertyReference::new(70), // ModelName
+//!     PropertyReference::new(PropertyIdentifier::VendorName as u32),
+//! ];
+//! let spec = ReadAccessSpecification::new(object_id, property_refs);
 //!
-//! let request = ReadPropertyMultipleService {
-//!     list_of_read_access_specs: vec![spec],
-//! };
+//! let request = ReadPropertyMultipleRequest::new(vec![spec]);
 //!
-//! let service = ConfirmedServiceChoice::ReadPropertyMultiple(request);
+//! let service_choice = ConfirmedServiceChoice::ReadPropertyMultiple;
 //! ```
 //!
 //! # Error Handling
@@ -144,18 +133,16 @@
 //! Services can fail for various reasons, and BACnet defines standardized error responses:
 //!
 //! ```rust
-//! use bacnet_rs::service::{ServiceError, ErrorClass, ErrorCode};
+//! use bacnet_rs::service::ServiceError;
 //!
 //! // Example error handling
-//! let error = ServiceError {
-//!     error_class: ErrorClass::Object,
-//!     error_code: ErrorCode::UnknownObject,
-//! };
+//! let error = ServiceError::InvalidParameters("Missing required property".to_string());
 //!
-//! match error.error_class {
-//!     ErrorClass::Object => println!("Object-related error: {:?}", error.error_code),
-//!     ErrorClass::Property => println!("Property-related error: {:?}", error.error_code),
-//!     ErrorClass::Device => println!("Device-related error: {:?}", error.error_code),
+//! match error {
+//!     ServiceError::UnsupportedService => println!("Service not supported"),
+//!     ServiceError::InvalidParameters(msg) => println!("Invalid parameters: {}", msg),
+//!     ServiceError::Timeout => println!("Request timed out"),
+//!     ServiceError::EncodingError(msg) => println!("Encoding error: {}", msg),
 //!     _ => println!("Other error: {:?}", error),
 //! }
 //! ```

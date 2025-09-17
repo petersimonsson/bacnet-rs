@@ -25,12 +25,15 @@ struct DiscoveredDevice {
     device_id: u32,
     address: SocketAddr,
     is_router: bool,
+    #[allow(dead_code)]
     vendor_id: Option<u16>,
+    #[allow(dead_code)]
     max_apdu_length: Option<u16>,
 }
 
 /// Structure to hold object information
 #[derive(Debug)]
+#[allow(dead_code)]
 struct ObjectInfo {
     object_identifier: ObjectIdentifier,
     object_name: Option<String>,
@@ -40,6 +43,7 @@ struct ObjectInfo {
     object_type_name: String,
 }
 
+#[allow(dead_code)]
 impl ObjectInfo {
     fn new(object_identifier: ObjectIdentifier) -> Self {
         let object_type_name = match object_identifier.object_type {
@@ -415,13 +419,13 @@ fn is_likely_router_device_id(device_id: u32) -> bool {
     // Enhanced patterns for router/gateway devices including Niagara controllers
     device_id == 5046 ||           // Specific IP-RS485 converter mentioned by user
     device_id < 100 ||             // Low device IDs often routers and infrastructure
-    (device_id >= 4000 && device_id <= 6000) || // Common router/converter range
-    (device_id >= 999990 && device_id <= 999999) || // High-end Niagara router range
+    (4000..=6000).contains(&device_id) || // Common router/converter range
+    (999990..=999999).contains(&device_id) || // High-end Niagara router range
     device_id % 1000 == 0 ||       // Round numbers often infrastructure
     device_id % 100 == 0 ||        // Niagara controllers often use round numbers
-    (device_id >= 1000 && device_id <= 1099) || // Common Niagara JACE range
-    (device_id >= 2000 && device_id <= 2099) || // Another common Niagara range
-    (device_id >= 10000 && device_id <= 10099) || // Enterprise Niagara range
+    (1000..=1099).contains(&device_id) || // Common Niagara JACE range
+    (2000..=2099).contains(&device_id) || // Another common Niagara range
+    (10000..=10099).contains(&device_id) || // Enterprise Niagara range
     has_router_device_naming_pattern(device_id) // Check for naming patterns
 }
 
@@ -431,12 +435,12 @@ fn has_router_device_naming_pattern(device_id: u32) -> bool {
     let id_str = device_id.to_string();
 
     // Look for patterns like 5046, 5047, etc. (consecutive gateway/device pairs)
-    if device_id >= 5040 && device_id <= 5050 {
+    if (5040..=5050).contains(&device_id) {
         return true;
     }
 
     // Niagara JACE controllers often have specific ranges
-    if device_id >= 4000 && device_id <= 4999 {
+    if (4000..=4999).contains(&device_id) {
         return true;
     }
 
@@ -529,14 +533,14 @@ fn get_device_ranges_for_router(router_id: u32) -> Vec<(&'static str, std::ops::
     ranges.push(("Common Range", 100..150));
 
     // Specific ranges based on router ID patterns
-    if router_id >= 5000 && router_id <= 5999 {
+    if (5000..=5999).contains(&router_id) {
         // For 5xxx routers (like 5046), check nearby devices
         ranges.push(("5xxx Series", 5000..5100));
-    } else if router_id >= 4000 && router_id <= 4999 {
+    } else if (4000..=4999).contains(&router_id) {
         // Niagara JACE controllers
         ranges.push(("Niagara JACE Range", 4000..4200));
         ranges.push(("Niagara Device Range", 1000..1200));
-    } else if router_id >= 1000 && router_id <= 1999 {
+    } else if (1000..=1999).contains(&router_id) {
         // Niagara station controllers
         ranges.push(("Niagara Station Range", 1000..1100));
         ranges.push(("Field Devices", 2000..2100));
@@ -616,6 +620,7 @@ fn read_router_network_info(
 }
 
 /// Discover the device ID by sending Who-Is and waiting for I-Am response
+#[allow(dead_code)]
 fn discover_device_id(
     socket: &UdpSocket,
     target_addr: SocketAddr,
@@ -682,6 +687,7 @@ fn discover_device_id(
 }
 
 /// Process I-Am response to extract device ID
+#[allow(dead_code)]
 fn process_iam_response(data: &[u8]) -> Option<u32> {
     // Check BVLC header
     if data.len() < 4 || data[0] != 0x81 {
@@ -732,6 +738,7 @@ fn process_iam_response(data: &[u8]) -> Option<u32> {
 }
 
 /// Read the device's object-list property to discover all objects
+#[allow(dead_code)]
 fn read_device_object_list(
     socket: &UdpSocket,
     target_addr: SocketAddr,
@@ -759,17 +766,21 @@ fn read_device_object_list(
 
     println!("Device object list contains {} objects", object_list.len());
     for (i, obj) in object_list.iter().enumerate() {
-        if i < 10 {
-            // Show first 10 for preview
-            println!(
-                "  {}: {} Instance {}",
-                i + 1,
-                get_object_type_name(obj.object_type),
-                obj.instance
-            );
-        } else if i == 10 {
-            println!("  ... and {} more objects", object_list.len() - 10);
-            break;
+        match i.cmp(&10) {
+            std::cmp::Ordering::Less => {
+                // Show first 10 for preview
+                println!(
+                    "  {}: {} Instance {}",
+                    i + 1,
+                    get_object_type_name(obj.object_type),
+                    obj.instance
+                );
+            }
+            std::cmp::Ordering::Equal => {
+                println!("  ... and {} more objects", object_list.len() - 10);
+                break;
+            }
+            std::cmp::Ordering::Greater => break,
         }
     }
 
@@ -777,6 +788,7 @@ fn read_device_object_list(
 }
 
 /// Read properties for multiple objects using ReadPropertyMultiple
+#[allow(dead_code)]
 fn read_objects_properties(
     socket: &UdpSocket,
     target_addr: SocketAddr,
@@ -867,6 +879,7 @@ fn read_objects_properties(
 }
 
 /// Send a confirmed request and wait for response
+#[allow(dead_code)]
 fn send_confirmed_request(
     socket: &UdpSocket,
     target_addr: SocketAddr,
@@ -946,6 +959,7 @@ fn send_confirmed_request(
 }
 
 /// Process confirmed response and extract service data
+#[allow(dead_code)]
 fn process_confirmed_response(data: &[u8], expected_invoke_id: u8) -> Option<Vec<u8>> {
     // Check BVLC header
     if data.len() < 4 || data[0] != 0x81 {
@@ -1006,6 +1020,7 @@ fn process_confirmed_response(data: &[u8], expected_invoke_id: u8) -> Option<Vec
 }
 
 /// Encode ReadPropertyMultiple request (simplified)
+#[allow(dead_code)]
 fn encode_rpm_request(
     request: &ReadPropertyMultipleRequest,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
@@ -1042,6 +1057,7 @@ fn encode_rpm_request(
 }
 
 /// Parse object list response to extract object identifiers
+#[allow(dead_code)]
 fn parse_object_list_response(
     data: &[u8],
 ) -> Result<Vec<ObjectIdentifier>, Box<dyn std::error::Error>> {
@@ -1076,6 +1092,7 @@ fn parse_object_list_response(
 }
 
 /// Parse ReadPropertyMultiple response - simplified for this device format
+#[allow(dead_code)]
 fn parse_rpm_response(
     data: &[u8],
     objects: &[ObjectIdentifier],
@@ -1222,6 +1239,7 @@ fn parse_rpm_response(
 }
 
 /// Extract character string from BACnet encoded data
+#[allow(dead_code)]
 fn extract_character_string(data: &[u8]) -> Option<(String, usize)> {
     if data.len() < 2 || data[0] != 0x75 {
         // Character string tag
@@ -1264,6 +1282,7 @@ fn extract_character_string(data: &[u8]) -> Option<(String, usize)> {
 }
 
 /// Extract present value based on object type
+#[allow(dead_code)]
 fn extract_present_value(data: &[u8], object_type: ObjectType) -> Option<(String, usize)> {
     if data.is_empty() {
         return None;
@@ -1312,16 +1331,19 @@ fn extract_present_value(data: &[u8], object_type: ObjectType) -> Option<(String
 }
 
 /// Extract units enumeration
+#[allow(dead_code)]
 fn extract_units(data: &[u8]) -> Option<(String, usize)> {
     decode_units(data)
 }
 
 /// Encode object identifier
+#[allow(dead_code)]
 fn encode_object_id(object_type: u16, instance: u32) -> u32 {
     ((object_type as u32) << 22) | (instance & 0x3FFFFF)
 }
 
 /// Decode object identifier  
+#[allow(dead_code)]
 fn decode_object_id(encoded: u32) -> (u16, u32) {
     let object_type = ((encoded >> 22) & 0x3FF) as u16;
     let instance = encoded & 0x3FFFFF;
@@ -1329,6 +1351,7 @@ fn decode_object_id(encoded: u32) -> (u16, u32) {
 }
 
 /// Get object type name as string
+#[allow(dead_code)]
 fn get_object_type_name(object_type: ObjectType) -> &'static str {
     match object_type {
         ObjectType::Device => "Device",

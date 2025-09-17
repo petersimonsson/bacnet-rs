@@ -188,11 +188,8 @@ fn demo_property_access(db: &ObjectDatabase) -> Result<(), Box<dyn std::error::E
     ];
 
     for prop_id in properties {
-        match db.get_property(ai1_id, prop_id) {
-            Ok(value) => {
-                println!("  {:?}: {}", prop_id, format_property_value(&value));
-            }
-            Err(_) => {} // Skip properties that aren't available
+        if let Ok(value) = db.get_property(ai1_id, prop_id) {
+            println!("  {:?}: {}", prop_id, format_property_value(&value));
         }
     }
 
