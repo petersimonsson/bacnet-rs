@@ -1107,7 +1107,7 @@ pub mod advanced {
 
         /// Encode a bit string
         pub fn encode_bit_string(buffer: &mut Vec<u8>, bits: &[bool]) -> Result<()> {
-            let byte_count = (bits.len() + 7) / 8;
+            let byte_count = bits.len().div_ceil(8);
             let unused_bits = if bits.len() % 8 == 0 {
                 0
             } else {
