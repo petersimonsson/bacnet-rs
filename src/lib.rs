@@ -22,7 +22,7 @@
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create a BACnet client
-//! let mut client = BacnetClient::new()?;
+//! let mut client = BacnetClient::new("0.0.0.0:47808").await?;
 //!
 //! // Discover devices on the network
 //! let devices = client.who_is_scan(std::time::Duration::from_secs(5)).await?;

@@ -47,18 +47,18 @@
 //! ## Encoding Basic Types
 //!
 //! ```rust
-//! use bacnet_rs::encoding::{encode_unsigned, encode_real, encode_boolean};
+//! use bacnet_rs::encoding::{encode_application_unsigned, encode_application_real, encode_application_boolean};
 //!
 //! let mut buffer = Vec::new();
 //!
 //! // Encode an unsigned integer
-//! encode_unsigned(&mut buffer, 42).unwrap();
+//! encode_application_unsigned(&mut buffer, 42).unwrap();
 //!
 //! // Encode a real number
-//! encode_real(&mut buffer, 23.5).unwrap();
+//! encode_application_real(&mut buffer, 23.5).unwrap();
 //!
 //! // Encode a boolean
-//! encode_boolean(&mut buffer, true).unwrap();
+//! encode_application_boolean(&mut buffer, true).unwrap();
 //!
 //! println!("Encoded {} bytes", buffer.len());
 //! ```
@@ -66,13 +66,13 @@
 //! ## Decoding Basic Types
 //!
 //! ```rust
-//! use bacnet_rs::encoding::{decode_unsigned, decode_real, ApplicationTag};
+//! use bacnet_rs::encoding::{decode_application_unsigned, decode_application_real, ApplicationTag};
 //!
 //! // Sample encoded data (tag + value)
 //! let data = vec![0x21, 0x2A]; // Unsigned integer 42
 //!
 //! // Decode the value
-//! let (value, consumed) = decode_unsigned(&data).unwrap();
+//! let (value, consumed) = decode_application_unsigned(&data).unwrap();
 //! assert_eq!(value, 42);
 //! assert_eq!(consumed, 2);
 //! ```
@@ -80,11 +80,11 @@
 //! ## Working with Application Tags
 //!
 //! ```rust
-//! use bacnet_rs::encoding::{ApplicationTag, decode_application_tag};
+//! use bacnet_rs::encoding::{ApplicationTag, get_application_tag};
 //!
 //! let data = vec![0x21, 0x2A]; // Unsigned integer
-//! let (tag, _, _) = decode_application_tag(&data).unwrap();
-//! assert_eq!(tag, ApplicationTag::UnsignedInt);
+//! let tag = get_application_tag(&data).unwrap();
+//! assert_eq!(tag, ApplicationTag::UnsignedInteger);
 //! ```
 //!
 //! ## Context-Specific Encoding
@@ -92,8 +92,10 @@
 //! ```rust
 //! use bacnet_rs::encoding::{encode_context_unsigned, decode_context_unsigned};
 //!
+//! let mut buffer = Vec::new();
+//!
 //! // Encode with context tag 3
-//! let buffer = encode_context_unsigned(1000, 3).unwrap();
+//! encode_context_unsigned(&mut buffer, 3, 1000).unwrap();
 //!
 //! // Decode with expected context tag 3
 //! let (value, consumed) = decode_context_unsigned(&buffer, 3).unwrap();
@@ -110,12 +112,12 @@
 //! - **Length Error**: Incorrect length fields
 //!
 //! ```rust
-//! use bacnet_rs::encoding::{EncodingError, decode_unsigned};
+//! use bacnet_rs::encoding::{EncodingError, decode_application_unsigned};
 //!
 //! let invalid_data = vec![0x21]; // Missing value byte
-//! match decode_unsigned(&invalid_data) {
+//! match decode_application_unsigned(&invalid_data) {
 //!     Ok((value, _)) => println!("Value: {}", value),
-//!     Err(EncodingError::UnexpectedEndOfData) => println!("Not enough data"),
+//!     Err(EncodingError::InsufficientData) => println!("Not enough data"),
 //!     Err(e) => println!("Other error: {:?}", e),
 //! }
 //! ```
@@ -252,20 +254,24 @@ pub fn decode_application_tag(data: &[u8]) -> Result<(ApplicationTag, usize, usi
         let len_byte = data[1];
         consumed += 1;
 
-        if len_byte < 254 {
-            length = len_byte as usize;
-        } else if len_byte == 254 {
-            if data.len() < 4 {
-                return Err(EncodingError::BufferUnderflow);
+        match len_byte {
+            0..=253 => {
+                length = len_byte as usize;
             }
-            length = u16::from_be_bytes([data[2], data[3]]) as usize;
-            consumed += 2;
-        } else {
-            if data.len() < 6 {
-                return Err(EncodingError::BufferUnderflow);
+            254 => {
+                if data.len() < 4 {
+                    return Err(EncodingError::BufferUnderflow);
+                }
+                length = u16::from_be_bytes([data[2], data[3]]) as usize;
+                consumed += 2;
             }
-            length = u32::from_be_bytes([data[2], data[3], data[4], data[5]]) as usize;
-            consumed += 4;
+            255 => {
+                if data.len() < 6 {
+                    return Err(EncodingError::BufferUnderflow);
+                }
+                length = u32::from_be_bytes([data[2], data[3], data[4], data[5]]) as usize;
+                consumed += 4;
+            }
         }
     }
 
@@ -781,20 +787,24 @@ pub fn decode_context_tag(data: &[u8]) -> Result<(u8, usize, usize)> {
         let len_byte = data[1];
         consumed += 1;
 
-        if len_byte < 254 {
-            length = len_byte as usize;
-        } else if len_byte == 254 {
-            if data.len() < 4 {
-                return Err(EncodingError::BufferUnderflow);
+        match len_byte {
+            0..=253 => {
+                length = len_byte as usize;
             }
-            length = u16::from_be_bytes([data[2], data[3]]) as usize;
-            consumed += 2;
-        } else {
-            if data.len() < 6 {
-                return Err(EncodingError::BufferUnderflow);
+            254 => {
+                if data.len() < 4 {
+                    return Err(EncodingError::BufferUnderflow);
+                }
+                length = u16::from_be_bytes([data[2], data[3]]) as usize;
+                consumed += 2;
             }
-            length = u32::from_be_bytes([data[2], data[3], data[4], data[5]]) as usize;
-            consumed += 4;
+            255 => {
+                if data.len() < 6 {
+                    return Err(EncodingError::BufferUnderflow);
+                }
+                length = u32::from_be_bytes([data[2], data[3], data[4], data[5]]) as usize;
+                consumed += 4;
+            }
         }
     }
 
@@ -1053,20 +1063,24 @@ pub mod advanced {
                 let len_byte = data[1];
                 consumed += 1;
 
-                if len_byte < 254 {
-                    length = len_byte as usize;
-                } else if len_byte == 254 {
-                    if data.len() < 4 {
-                        return Err(EncodingError::BufferUnderflow);
+                match len_byte {
+                    0..=253 => {
+                        length = len_byte as usize;
                     }
-                    length = u16::from_be_bytes([data[2], data[3]]) as usize;
-                    consumed += 2;
-                } else {
-                    if data.len() < 6 {
-                        return Err(EncodingError::BufferUnderflow);
+                    254 => {
+                        if data.len() < 4 {
+                            return Err(EncodingError::BufferUnderflow);
+                        }
+                        length = u16::from_be_bytes([data[2], data[3]]) as usize;
+                        consumed += 2;
                     }
-                    length = u32::from_be_bytes([data[2], data[3], data[4], data[5]]) as usize;
-                    consumed += 4;
+                    255 => {
+                        if data.len() < 6 {
+                            return Err(EncodingError::BufferUnderflow);
+                        }
+                        length = u32::from_be_bytes([data[2], data[3], data[4], data[5]]) as usize;
+                        consumed += 4;
+                    }
                 }
             }
 
@@ -1098,7 +1112,7 @@ pub mod advanced {
 
         /// Encode a bit string
         pub fn encode_bit_string(buffer: &mut Vec<u8>, bits: &[bool]) -> Result<()> {
-            let byte_count = bits.len().div_ceil(8);
+            let byte_count = (bits.len() + 7) / 8;
             let unused_bits = if bits.len() % 8 == 0 {
                 0
             } else {
@@ -1590,10 +1604,7 @@ pub struct PropertyArrayEncoder {
 impl PropertyArrayEncoder {
     /// Create a new property array encoder
     pub fn new() -> Self {
-        Self {
-            buffer: Vec::new(),
-            count: 0,
-        }
+        Self::default()
     }
 
     /// Add a property value
@@ -1641,7 +1652,7 @@ pub struct ErrorEncoder {
 impl ErrorEncoder {
     /// Create a new error encoder
     pub fn new() -> Self {
-        Self { buffer: Vec::new() }
+        Self::default()
     }
 
     /// Encode an error class and code
@@ -2142,14 +2153,14 @@ mod tests {
         // Test true
         encode_boolean(&mut buffer, true).unwrap();
         let (value, consumed) = decode_boolean(&buffer).unwrap();
-        assert_eq!(value, true);
+        assert!(value);
         assert_eq!(consumed, 1);
 
         // Test false
         buffer.clear();
         encode_boolean(&mut buffer, false).unwrap();
         let (value, consumed) = decode_boolean(&buffer).unwrap();
-        assert_eq!(value, false);
+        assert!(!value);
         assert_eq!(consumed, 1);
     }
 

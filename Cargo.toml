@@ -34,6 +34,9 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # CRC calculations
 crc = "3.2"
 
+# Hex encoding/decoding
+hex = "0.4"
+
 # Optional async runtime
 async-trait = { version = "0.1", optional = true }
 

@@ -571,8 +571,8 @@ mod tests {
     fn test_binary_pv_conversions() {
         assert_eq!(BinaryPV::from(true), BinaryPV::Active);
         assert_eq!(BinaryPV::from(false), BinaryPV::Inactive);
-        assert_eq!(bool::from(BinaryPV::Active), true);
-        assert_eq!(bool::from(BinaryPV::Inactive), false);
+        assert!(bool::from(BinaryPV::Active));
+        assert!(!bool::from(BinaryPV::Inactive));
     }
 
     #[test]

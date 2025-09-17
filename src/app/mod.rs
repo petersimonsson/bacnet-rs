@@ -131,7 +131,7 @@ pub enum Apdu {
 
     /// Unconfirmed service request
     UnconfirmedRequest {
-        service_choice: UnconfirmedServiceChoice,
+        service_choice: u8,
         service_data: Vec<u8>,
     },
 
@@ -307,7 +307,7 @@ impl Apdu {
                 // PDU Type
                 buffer.push((ApduType::UnconfirmedRequest as u8) << 4);
                 // Service choice
-                buffer.push(*service_choice as u8);
+                buffer.push(*service_choice);
                 // Service data
                 buffer.extend_from_slice(service_data);
             }
@@ -552,9 +552,7 @@ impl Apdu {
                     ));
                 }
 
-                let service_choice = data[1].try_into().map_err(|_| {
-                    ApplicationError::InvalidApdu("Unsupported service choice".to_string())
-                })?;
+                let service_choice = data[1];
                 let service_data = if data.len() > 2 {
                     data[2..].to_vec()
                 } else {
@@ -1137,18 +1135,21 @@ impl Default for SupportedServices {
     }
 }
 
-type PropertyProcessor = Box<dyn Fn(&[u8]) -> Result<Vec<u8>> + Send + Sync>;
-type WhoIsProcessor = Box<dyn Fn(&[u8]) -> Result<Option<Vec<u8>>> + Send + Sync>;
+/// Type alias for service processor function
+type ServiceProcessor = Box<dyn Fn(&[u8]) -> Result<Vec<u8>> + Send + Sync>;
+
+/// Type alias for optional service processor function
+type OptionalServiceProcessor = Box<dyn Fn(&[u8]) -> Result<Option<Vec<u8>>> + Send + Sync>;
 
 /// Service processors for handling different service types
 #[derive(Default)]
 struct ServiceProcessors {
     /// Read property processor
-    read_property: Option<PropertyProcessor>,
+    read_property: Option<ServiceProcessor>,
     /// Write property processor
-    write_property: Option<PropertyProcessor>,
+    write_property: Option<ServiceProcessor>,
     /// Who-Is processor
-    who_is: Option<WhoIsProcessor>,
+    who_is: Option<OptionalServiceProcessor>,
 }
 
 impl fmt::Debug for ServiceProcessors {
@@ -1318,16 +1319,32 @@ impl ApplicationLayerHandler {
     /// Process an unconfirmed request
     fn process_unconfirmed_request(
         &mut self,
-        service_choice: UnconfirmedServiceChoice,
+        service_choice: u8,
         service_data: &[u8],
     ) -> Result<Option<Apdu>> {
         self.stats.unconfirmed_requests += 1;
 
-        if service_choice == UnconfirmedServiceChoice::WhoIs {
+        // Unconfirmed requests don't get responses unless it's I-Am for Who-Is
+        use crate::service::UnconfirmedServiceChoice;
+        let service = match service_choice {
+            0 => UnconfirmedServiceChoice::IAm,
+            1 => UnconfirmedServiceChoice::IHave,
+            2 => UnconfirmedServiceChoice::UnconfirmedEventNotification,
+            3 => UnconfirmedServiceChoice::UnconfirmedEventNotification,
+            4 => UnconfirmedServiceChoice::UnconfirmedPrivateTransfer,
+            5 => UnconfirmedServiceChoice::UnconfirmedTextMessage,
+            6 => UnconfirmedServiceChoice::TimeSynchronization,
+            7 => UnconfirmedServiceChoice::WhoHas,
+            8 => UnconfirmedServiceChoice::WhoIs,
+            9 => UnconfirmedServiceChoice::UtcTimeSynchronization,
+            _ => return Ok(None),
+        };
+
+        if service == UnconfirmedServiceChoice::WhoIs {
             if let Some(ref processor) = self.service_processors.who_is {
                 if let Ok(Some(response_data)) = processor(service_data) {
                     return Ok(Some(Apdu::UnconfirmedRequest {
-                        service_choice: UnconfirmedServiceChoice::IAm,
+                        service_choice: UnconfirmedServiceChoice::IAm as u8,
                         service_data: response_data,
                     }));
                 }
@@ -1774,7 +1791,7 @@ mod tests {
             } => {
                 assert_eq!(invoke_id, 123);
                 assert_eq!(service_choice, 12);
-                assert_eq!(segmented_response_accepted, true);
+                assert!(segmented_response_accepted);
             }
             _ => panic!("Expected ConfirmedRequest"),
         }

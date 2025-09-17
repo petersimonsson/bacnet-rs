@@ -85,67 +85,58 @@
 //! ## Reading a Property
 //!
 //! ```rust
-//! use bacnet_rs::service::{ConfirmedServiceChoice, ReadPropertyRequest};
+//! use bacnet_rs::service::{ConfirmedServiceChoice, ReadPropertyService};
 //! use bacnet_rs::object::{ObjectIdentifier, ObjectType, PropertyIdentifier};
 //!
 //! // Create a read property request
 //! let object_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
-//! let request = ReadPropertyRequest {
+//! let request = ReadPropertyService {
 //!     object_identifier: object_id,
-//!     property_identifier: PropertyIdentifier::PresentValue as u32,
+//!     property_identifier: PropertyIdentifier::PresentValue,
 //!     property_array_index: None,
 //! };
 //!
 //! // This would be sent as a confirmed service
-//! let service = ConfirmedServiceChoice::ReadProperty;
+//! let service = ConfirmedServiceChoice::ReadProperty(request);
 //! ```
 //!
 //! ## Device Discovery
 //!
 //! ```rust
-//! use bacnet_rs::service::{UnconfirmedServiceChoice, WhoIsRequest};
+//! use bacnet_rs::service::{UnconfirmedServiceChoice, WhoIsService};
 //!
 //! // Create a Who-Is request to discover all devices
-//! let who_is = WhoIsRequest {
+//! let who_is = WhoIsService {
 //!     device_instance_range_low_limit: None,
 //!     device_instance_range_high_limit: None,
 //! };
 //!
 //! // This would be sent as an unconfirmed service
-//! let service = UnconfirmedServiceChoice::WhoIs;
+//! let service = UnconfirmedServiceChoice::WhoIs(who_is);
 //! ```
 //!
 //! ## Reading Multiple Properties
 //!
 //! ```rust
-//! use bacnet_rs::service::{ConfirmedServiceChoice, ReadPropertyMultipleRequest, ReadAccessSpecification, PropertyReference};
+//! use bacnet_rs::service::{ConfirmedServiceChoice, ReadPropertyMultipleService, ReadAccessSpecification};
 //! use bacnet_rs::object::{ObjectIdentifier, ObjectType, PropertyIdentifier};
 //!
 //! // Create a read property multiple request
 //! let object_id = ObjectIdentifier::new(ObjectType::Device, 12345);
 //! let spec = ReadAccessSpecification {
 //!     object_identifier: object_id,
-//!     property_references: vec![
-//!         PropertyReference {
-//!             property_identifier: PropertyIdentifier::ObjectName as u32,
-//!             property_array_index: None
-//!         },
-//!         PropertyReference {
-//!             property_identifier: PropertyIdentifier::ModelName as u32,
-//!             property_array_index: None
-//!         },
-//!         PropertyReference {
-//!             property_identifier: PropertyIdentifier::VendorName as u32,
-//!             property_array_index: None
-//!         },
+//!     list_of_property_references: vec![
+//!         PropertyIdentifier::ObjectName,
+//!         PropertyIdentifier::ModelName,
+//!         PropertyIdentifier::VendorName,
 //!     ],
 //! };
 //!
-//! let request = ReadPropertyMultipleRequest {
-//!     read_access_specifications: vec![spec],
+//! let request = ReadPropertyMultipleService {
+//!     list_of_read_access_specs: vec![spec],
 //! };
 //!
-//! let service = ConfirmedServiceChoice::ReadPropertyMultiple;
+//! let service = ConfirmedServiceChoice::ReadPropertyMultiple(request);
 //! ```
 //!
 //! # Error Handling
@@ -153,18 +144,19 @@
 //! Services can fail for various reasons, and BACnet defines standardized error responses:
 //!
 //! ```rust
-//! use bacnet_rs::service::ServiceError;
+//! use bacnet_rs::service::{ServiceError, ErrorClass, ErrorCode};
 //!
 //! // Example error handling
-//! let error = ServiceError::UnsupportedService;
+//! let error = ServiceError {
+//!     error_class: ErrorClass::Object,
+//!     error_code: ErrorCode::UnknownObject,
+//! };
 //!
-//! match error {
-//!     ServiceError::UnsupportedService => println!("UnsupportedService"),
-//!     ServiceError::InvalidParameters(p) => println!("InvalidParameters: {p}"),
-//!     ServiceError::Timeout => println!("Timeout"),
-//!     ServiceError::Rejected(r) => println!("Rejected: {r:?}"),
-//!     ServiceError::Aborted(r) => println!("Aborted: {r:?}"),
-//!     ServiceError::EncodingError(s) => println!("EncodingError: {s}"),
+//! match error.error_class {
+//!     ErrorClass::Object => println!("Object-related error: {:?}", error.error_code),
+//!     ErrorClass::Property => println!("Property-related error: {:?}", error.error_code),
+//!     ErrorClass::Device => println!("Device-related error: {:?}", error.error_code),
+//!     _ => println!("Other error: {:?}", error),
 //! }
 //! ```
 //!
@@ -215,8 +207,6 @@ pub enum ServiceError {
     Aborted(AbortReason),
     /// Encoding/decoding error
     EncodingError(String),
-    /// UnconfirmedServiceChoice is not supported,
-    UnsupportedUnconfirmedServiceChoice,
 }
 
 impl fmt::Display for ServiceError {
@@ -228,9 +218,6 @@ impl fmt::Display for ServiceError {
             ServiceError::Rejected(reason) => write!(f, "Service rejected: {:?}", reason),
             ServiceError::Aborted(reason) => write!(f, "Service aborted: {:?}", reason),
             ServiceError::EncodingError(msg) => write!(f, "Encoding error: {}", msg),
-            ServiceError::UnsupportedUnconfirmedServiceChoice => {
-                write!(f, "UnconfirmedServiceChoice not supported")
-            }
         }
     }
 }
@@ -293,24 +280,6 @@ pub enum UnconfirmedServiceChoice {
     UtcTimeSynchronization = 9,
 }
 
-impl TryFrom<u8> for UnconfirmedServiceChoice {
-    type Error = ServiceError;
-
-    fn try_from(value: u8) -> core::result::Result<Self, Self::Error> {
-        match value {
-            0 => Ok(UnconfirmedServiceChoice::IAm),
-            1 => Ok(UnconfirmedServiceChoice::IHave),
-            2 => Ok(UnconfirmedServiceChoice::UnconfirmedEventNotification),
-            3 => Ok(UnconfirmedServiceChoice::UnconfirmedPrivateTransfer),
-            4 => Ok(UnconfirmedServiceChoice::UnconfirmedTextMessage),
-            5 => Ok(UnconfirmedServiceChoice::TimeSynchronization),
-            6 => Ok(UnconfirmedServiceChoice::WhoHas),
-            7 => Ok(UnconfirmedServiceChoice::UtcTimeSynchronization),
-            _ => Err(ServiceError::UnsupportedUnconfirmedServiceChoice),
-        }
-    }
-}
-
 /// Reject reason codes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RejectReason {
@@ -348,11 +317,11 @@ use crate::object::{ObjectIdentifier, PropertyValue};
 pub const BACNET_ARRAY_ALL: u32 = 0xFFFFFFFF;
 
 /// Who-Is request (unconfirmed service)
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WhoIsRequest {
     /// Low limit of device instance range (optional)
     pub device_instance_range_low_limit: Option<u32>,
-    /// High limit of device instance range (optional)  
+    /// High limit of device instance range (optional)
     pub device_instance_range_high_limit: Option<u32>,
 }
 
@@ -449,12 +418,6 @@ impl WhoIsRequest {
             (Some(low), None) => device_instance >= low,
             (None, Some(high)) => device_instance <= high,
         }
-    }
-}
-
-impl Default for WhoIsRequest {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -1200,7 +1163,7 @@ impl CovSubscription {
 }
 
 /// COV Subscription manager
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct CovSubscriptionManager {
     /// List of active subscriptions
     subscriptions: Vec<CovSubscription>,
@@ -1269,12 +1232,6 @@ impl CovSubscriptionManager {
             .iter()
             .filter(|s| !s.is_expired())
             .count()
-    }
-}
-
-impl Default for CovSubscriptionManager {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -1618,7 +1575,7 @@ pub struct BacnetDateTime {
 }
 
 impl BacnetDateTime {
-    /// Create a new BACnet DateTime
+    /// Create a new BACnet DateTime from Date and Time components
     pub fn new(date: crate::object::Date, time: crate::object::Time) -> Self {
         Self { date, time }
     }
@@ -1629,19 +1586,27 @@ impl BacnetDateTime {
         use chrono::{Datelike, Local, Timelike};
 
         let now = Local::now();
+        let year = now.year() as u16;
+        let month = now.month() as u8;
+        let day = now.day() as u8;
+        let weekday = now.weekday().number_from_monday() as u8; // BACnet uses 1=Monday
+        let hour = now.hour() as u8;
+        let minute = now.minute() as u8;
+        let second = now.second() as u8;
+        let hundredths = (now.nanosecond() / 10_000_000) as u8;
+
         let date = crate::object::Date {
-            year: now.year() as u16,
-            month: now.month() as u8,
-            day: now.day() as u8,
-            weekday: now.weekday().number_from_monday() as u8, // BACnet uses 1=Monday
+            year,
+            month,
+            day,
+            weekday,
         };
         let time = crate::object::Time {
-            hour: now.hour() as u8,
-            minute: now.minute() as u8,
-            second: now.second() as u8,
-            hundredths: (now.nanosecond() / 10_000_000) as u8,
+            hour,
+            minute,
+            second,
+            hundredths,
         };
-
         Self::new(date, time)
     }
 
@@ -1775,20 +1740,19 @@ impl UtcTimeSynchronizationRequest {
         let second = now.second() as u8;
         let hundredths = (now.nanosecond() / 10_000_000) as u8;
 
-        let utc_date_time = BacnetDateTime::new(
-            crate::object::Date {
-                year,
-                month,
-                day,
-                weekday,
-            },
-            crate::object::Time {
-                hour,
-                minute,
-                second,
-                hundredths,
-            },
-        );
+        let date = crate::object::Date {
+            year,
+            month,
+            day,
+            weekday,
+        };
+        let time = crate::object::Time {
+            hour,
+            minute,
+            second,
+            hundredths,
+        };
+        let utc_date_time = BacnetDateTime::new(date, time);
         Self::new(utc_date_time)
     }
 
@@ -2048,7 +2012,7 @@ mod tests {
         // Test stream access response
         let data = vec![1, 2, 3, 4, 5];
         let response_stream = AtomicReadFileResponse::new_stream_access(false, 0, data.clone());
-        assert_eq!(response_stream.end_of_file, false);
+        assert!(!response_stream.end_of_file);
 
         match &response_stream.access_method_result {
             FileAccessMethodResult::StreamAccess {
@@ -2064,7 +2028,7 @@ mod tests {
         // Test record access response
         let records = vec![vec![1, 2], vec![3, 4], vec![5, 6]];
         let response_record = AtomicReadFileResponse::new_record_access(true, 10, records.clone());
-        assert_eq!(response_record.end_of_file, true);
+        assert!(response_record.end_of_file);
 
         match &response_record.access_method_result {
             FileAccessMethodResult::RecordAccess {
@@ -2135,20 +2099,19 @@ mod tests {
     #[test]
     fn test_bacnet_datetime() {
         // Test creating specific datetime
-        let datetime = BacnetDateTime::new(
-            crate::object::Date {
-                year: 2024,
-                month: 3,
-                day: 15,
-                weekday: 5,
-            },
-            crate::object::Time {
-                hour: 14,
-                minute: 30,
-                second: 45,
-                hundredths: 50,
-            },
-        );
+        let date = crate::object::Date {
+            year: 2024,
+            month: 3,
+            day: 15,
+            weekday: 5,
+        };
+        let time = crate::object::Time {
+            hour: 14,
+            minute: 30,
+            second: 45,
+            hundredths: 50,
+        };
+        let datetime = BacnetDateTime::new(date, time);
         assert_eq!(datetime.date.year, 2024);
         assert_eq!(datetime.date.month, 3);
         assert_eq!(datetime.date.day, 15);
@@ -2176,20 +2139,19 @@ mod tests {
 
     #[test]
     fn test_time_synchronization_request() {
-        let datetime = BacnetDateTime::new(
-            crate::object::Date {
-                year: 2024,
-                month: 6,
-                day: 20,
-                weekday: 4,
-            },
-            crate::object::Time {
-                hour: 10,
-                minute: 15,
-                second: 30,
-                hundredths: 25,
-            },
-        );
+        let date = crate::object::Date {
+            year: 2024,
+            month: 6,
+            day: 20,
+            weekday: 4,
+        };
+        let time = crate::object::Time {
+            hour: 10,
+            minute: 15,
+            second: 30,
+            hundredths: 25,
+        };
+        let datetime = BacnetDateTime::new(date, time);
         let time_sync = TimeSynchronizationRequest::new(datetime);
 
         assert_eq!(time_sync.date_time, datetime);
@@ -2205,20 +2167,19 @@ mod tests {
 
     #[test]
     fn test_utc_time_synchronization_request() {
-        let utc_datetime = BacnetDateTime::new(
-            crate::object::Date {
-                year: 2024,
-                month: 6,
-                day: 20,
-                weekday: 4,
-            },
-            crate::object::Time {
-                hour: 18,
-                minute: 45,
-                second: 15,
-                hundredths: 75,
-            },
-        );
+        let date = crate::object::Date {
+            year: 2024,
+            month: 6,
+            day: 20,
+            weekday: 4,
+        };
+        let time = crate::object::Time {
+            hour: 18,
+            minute: 45,
+            second: 15,
+            hundredths: 75,
+        };
+        let utc_datetime = BacnetDateTime::new(date, time);
         let utc_sync = UtcTimeSynchronizationRequest::new(utc_datetime);
 
         assert_eq!(utc_sync.utc_date_time, utc_datetime);

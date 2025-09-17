@@ -338,6 +338,7 @@ pub struct DatabaseStatistics {
 
 /// Object database builder for convenient setup
 #[cfg(feature = "std")]
+#[derive(Default)]
 pub struct DatabaseBuilder {
     device: Option<Device>,
     objects: Vec<Box<dyn BacnetObject>>,
@@ -354,10 +355,7 @@ impl Default for DatabaseBuilder {
 impl DatabaseBuilder {
     /// Create a new database builder
     pub fn new() -> Self {
-        Self {
-            device: None,
-            objects: Vec::new(),
-        }
+        Self::default()
     }
 
     /// Set the device object

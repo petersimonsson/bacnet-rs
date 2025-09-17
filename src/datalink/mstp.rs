@@ -326,7 +326,8 @@ impl Default for MstpConfig {
     }
 }
 
-type SendQueue = Arc<Mutex<VecDeque<(MstpFrame, DataLinkAddress)>>>;
+/// Type alias for receive queue
+#[cfg(feature = "std")]
 type ReceiveQueue = Arc<Mutex<VecDeque<(Vec<u8>, DataLinkAddress)>>>;
 
 /// MS/TP data link implementation
@@ -341,7 +342,7 @@ pub struct MstpDataLink {
     /// Next station for token passing
     _next_station: Arc<Mutex<u8>>,
     /// Send queue
-    send_queue: SendQueue,
+    send_queue: Arc<Mutex<VecDeque<(MstpFrame, DataLinkAddress)>>>,
     /// Receive queue
     receive_queue: ReceiveQueue,
     /// Serial port name

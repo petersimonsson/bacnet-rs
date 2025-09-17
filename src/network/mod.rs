@@ -1031,8 +1031,9 @@ pub struct NetworkLayerHandler {
     pub stats: NetworkStatistics,
 }
 
-type IAmRouterHandler = fn(&NetworkAddress, &[u16]) -> Option<NetworkLayerMessage>;
+// Type aliases for complex function pointer types
 type WhoIsRouterHandler = fn(&NetworkAddress, Option<u16>) -> Option<NetworkLayerMessage>;
+type IAmRouterHandler = fn(&NetworkAddress, &[u16]) -> Option<NetworkLayerMessage>;
 
 /// Network message processors
 #[derive(Debug, Default)]

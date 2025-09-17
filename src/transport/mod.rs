@@ -780,23 +780,17 @@ impl Transport for BacnetIpTransport {
 
 /// BDT (Broadcast Distribution Table) management
 #[cfg(feature = "std")]
+#[derive(Default)]
 pub struct BroadcastManager {
     /// BDT entries
     bdt: Vec<BdtEntry>,
 }
 
 #[cfg(feature = "std")]
-impl Default for BroadcastManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(feature = "std")]
 impl BroadcastManager {
     /// Create new broadcast manager
     pub fn new() -> Self {
-        Self { bdt: Vec::new() }
+        Self::default()
     }
 
     /// Add BDT entry
@@ -1082,7 +1076,6 @@ pub mod timeout_utils {
 ///
 /// This would require a separate feature flag and significant additional dependencies,
 /// so it's planned for a future major version.
-
 #[cfg(test)]
 mod tests {
     use super::*;

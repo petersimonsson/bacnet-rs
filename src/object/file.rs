@@ -325,7 +325,7 @@ mod tests {
         // Test property modification
         file.set_property(PropertyIdentifier::Archive, PropertyValue::Boolean(true))
             .unwrap();
-        assert_eq!(file.archive, true);
+        assert!(file.archive);
     }
 
     #[test]

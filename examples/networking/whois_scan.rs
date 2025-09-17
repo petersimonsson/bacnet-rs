@@ -4,7 +4,6 @@
 //! BACnet devices on the network using the corrected service layer implementation.
 
 use bacnet_rs::{
-    app::Apdu,
     datalink::{bip::BacnetIpDataLink, DataLink, DataLinkAddress},
     network::Npdu,
     service::{IAmRequest, UnconfirmedServiceChoice, WhoIsRequest},
@@ -29,7 +28,7 @@ struct DiscoveredDevice {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("BACnet Who-Is Scan Example");
-    println!("==========================\n");
+    println!("========================\n");
 
     // Create BACnet/IP data link (use 0 to let system choose port)
     println!("Creating BACnet/IP data link...");
@@ -46,10 +45,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     whois.encode(&mut service_data)?;
 
     // Create APDU (Application Protocol Data Unit)
-    let apdu = Apdu::UnconfirmedRequest {
-        service_choice: UnconfirmedServiceChoice::WhoIs,
-        service_data,
-    };
+    let mut apdu_buffer = Vec::new();
+    apdu_buffer.push(0x10); // Unconfirmed Request PDU
+    apdu_buffer.push(UnconfirmedServiceChoice::WhoIs as u8);
+    apdu_buffer.extend_from_slice(&service_data);
 
     // Create NPDU using our corrected global broadcast
     let npdu = Npdu::global_broadcast();
@@ -59,7 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Combine NPDU and APDU
     let mut message = npdu_buffer;
-    message.extend_from_slice(&apdu.encode());
+    message.extend_from_slice(&apdu_buffer);
 
     // Send the Who-Is broadcast
     println!("Sending Who-Is broadcast...");
@@ -78,12 +77,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for addr_str in &local_broadcasts {
         if let Ok(addr) = addr_str.parse::<SocketAddr>() {
-            // Ignore errors for unreachable broadcasts
-            if datalink
-                .send_frame(&message, &DataLinkAddress::Ip(addr))
-                .is_ok()
-            {
-                println!("Sent Who-Is to local broadcast: {}", addr);
+            match datalink.send_frame(&message, &DataLinkAddress::Ip(addr)) {
+                Ok(_) => println!("Sent Who-Is to local broadcast: {}", addr),
+                Err(_) => {} // Ignore errors for unreachable broadcasts
             }
         }
     }
@@ -102,7 +98,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Re-broadcast every 2 seconds
         if last_broadcast.elapsed() > Duration::from_secs(2) {
             println!("Sending periodic Who-Is broadcast...");
-            let _ = datalink.send_frame(&message, &DataLinkAddress::Broadcast);
+            match datalink.send_frame(&message, &DataLinkAddress::Broadcast) {
+                Ok(_) => {}
+                Err(_) => {}
+            }
             last_broadcast = Instant::now();
         }
 
@@ -119,9 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // Process the received message
                 if let Some(device) = process_response(&data, source_addr) {
-                    if let std::collections::hash_map::Entry::Vacant(e) =
-                        discovered_devices.entry(device.device_id)
-                    {
+                    if !discovered_devices.contains_key(&device.device_id) {
                         println!("Discovered new device:");
                         println!("  Device ID: {}", device.device_id);
                         println!("  Address: {}", device.address);
@@ -142,7 +139,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         );
                         println!();
 
-                        e.insert(device);
+                        discovered_devices.insert(device.device_id, device);
                     }
                 }
             }
@@ -205,7 +202,7 @@ fn process_response(data: &[u8], source: SocketAddr) -> Option<DiscoveredDevice>
     }
 
     // Decode NPDU starting from the beginning of the data
-    let (_npdu, npdu_len) = match Npdu::decode(data) {
+    let (_npdu, npdu_len) = match Npdu::decode(&data) {
         Ok(result) => result,
         Err(e) => {
             println!("  Failed to decode NPDU: {:?}", e);
@@ -220,29 +217,39 @@ fn process_response(data: &[u8], source: SocketAddr) -> Option<DiscoveredDevice>
         return None;
     }
 
-    let apdu = Apdu::decode(&data[apdu_start..]).ok()?;
+    let apdu = &data[apdu_start..];
 
-    match apdu {
-        Apdu::UnconfirmedRequest {
-            service_choice: UnconfirmedServiceChoice::IAm,
-            service_data,
-        } => match IAmRequest::decode(&service_data) {
-            Ok(iam) => {
-                let vendor_name = get_vendor_name(iam.vendor_identifier as u16)
-                    .unwrap_or("Unknown Vendor")
-                    .to_string();
+    // Check if this is an unconfirmed I-Am service
+    if apdu.len() < 2 || apdu[0] != 0x10 {
+        // Unconfirmed Request PDU
+        return None;
+    }
 
-                Some(DiscoveredDevice {
-                    device_id: iam.device_identifier.instance,
-                    address: source,
-                    vendor_id: iam.vendor_identifier,
-                    vendor_name,
-                    max_apdu: iam.max_apdu_length_accepted,
-                    segmentation: iam.segmentation_supported,
-                })
-            }
-            Err(_) => None,
-        },
-        _ => None,
+    let service_choice = apdu[1];
+    if service_choice != UnconfirmedServiceChoice::IAm as u8 {
+        return None;
+    }
+
+    // Decode I-Am request
+    if apdu.len() <= 2 {
+        return None;
+    }
+
+    match IAmRequest::decode(&apdu[2..]) {
+        Ok(iam) => {
+            let vendor_name = get_vendor_name(iam.vendor_identifier as u16)
+                .unwrap_or("Unknown Vendor")
+                .to_string();
+
+            Some(DiscoveredDevice {
+                device_id: iam.device_identifier.instance,
+                address: source,
+                vendor_id: iam.vendor_identifier,
+                vendor_name,
+                max_apdu: iam.max_apdu_length_accepted,
+                segmentation: iam.segmentation_supported,
+            })
+        }
+        Err(_) => None,
     }
 }

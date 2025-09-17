@@ -563,7 +563,7 @@ mod tests {
         assert_eq!(ai.identifier.instance, 1);
         assert_eq!(ai.object_name, "Temperature Sensor");
         assert_eq!(ai.present_value, 0.0);
-        assert_eq!(ai.out_of_service, false);
+        assert!(!ai.out_of_service);
     }
 
     #[test]
@@ -619,10 +619,10 @@ mod tests {
 
         ai.set_status_flags(true, false, true, false);
         let (in_alarm, fault, overridden, out_of_service) = ai.get_status_flags();
-        assert_eq!(in_alarm, true);
-        assert_eq!(fault, false);
-        assert_eq!(overridden, true);
-        assert_eq!(out_of_service, false);
+        assert!(in_alarm);
+        assert!(!fault);
+        assert!(overridden);
+        assert!(!out_of_service);
         assert_eq!(ai.status_flags, 0x0A); // 1010 in binary
     }
 }
