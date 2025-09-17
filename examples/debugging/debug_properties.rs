@@ -53,9 +53,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let property_refs = vec![
-        PropertyReference::new(77), // Object_Name
-        PropertyReference::new(28), // Description
-        PropertyReference::new(85), // Present_Value
+        PropertyReference::new(77),  // Object_Name
+        PropertyReference::new(28),  // Description
+        PropertyReference::new(85),  // Present_Value
         PropertyReference::new(117), // Units
     ];
 

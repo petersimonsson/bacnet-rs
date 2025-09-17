@@ -487,10 +487,10 @@ fn read_property(
     // Reference: bacnet-stack/src/bacnet/rp.c
 
     let mut apdu = vec![
-        0x00, // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
-        0x05, // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
+        0x00,      // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
+        0x05,      // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
         invoke_id, // invoke_id
-        0x0C, // SERVICE_CONFIRMED_READ_PROPERTY (12)
+        0x0C,      // SERVICE_CONFIRMED_READ_PROPERTY (12)
     ];
 
     // ReadProperty Service Data - following read_property_request_encode()
@@ -863,10 +863,10 @@ fn read_object_property(
     let invoke_id = if invoke_id == 0 { 101 } else { invoke_id };
 
     let mut apdu = vec![
-        0x00, // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
-        0x05, // encode_max_segs_max_apdu(0, MAX_APDU)
+        0x00,      // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
+        0x05,      // encode_max_segs_max_apdu(0, MAX_APDU)
         invoke_id, // invoke_id
-        0x0C, // SERVICE_CONFIRMED_READ_PROPERTY
+        0x0C,      // SERVICE_CONFIRMED_READ_PROPERTY
     ];
 
     // ReadProperty Service Data
@@ -927,9 +927,12 @@ fn read_object_property(
                             let pdu_type = (apdu_data[0] & 0xF0) >> 4;
                             let resp_invoke_id = apdu_data[0] & 0x0F;
 
-                            if resp_invoke_id == (invoke_id & 0x0F) && pdu_type == 0x3 && apdu_data.len() >= 2 && apdu_data[1] == 0x0C {
-                                if let Ok(response) =
-                                    ReadPropertyResponse::decode(&apdu_data[2..])
+                            if resp_invoke_id == (invoke_id & 0x0F)
+                                && pdu_type == 0x3
+                                && apdu_data.len() >= 2
+                                && apdu_data[1] == 0x0C
+                            {
+                                if let Ok(response) = ReadPropertyResponse::decode(&apdu_data[2..])
                                 {
                                     return extract_string_value(&response.property_value);
                                 } else {
@@ -961,10 +964,10 @@ fn read_property_with_array_index(
     let invoke_id = if invoke_id == 0 { 201 } else { invoke_id };
 
     let mut apdu = vec![
-        0x00, // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
-        0x05, // encode_max_segs_max_apdu(0, MAX_APDU)
+        0x00,      // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
+        0x05,      // encode_max_segs_max_apdu(0, MAX_APDU)
         invoke_id, // invoke_id
-        0x0C, // SERVICE_CONFIRMED_READ_PROPERTY
+        0x0C,      // SERVICE_CONFIRMED_READ_PROPERTY
     ];
 
     // ReadProperty Service Data
@@ -1029,9 +1032,12 @@ fn read_property_with_array_index(
                             let pdu_type = (apdu_data[0] & 0xF0) >> 4;
                             let resp_invoke_id = apdu_data[0] & 0x0F;
 
-                            if resp_invoke_id == (invoke_id & 0x0F) && pdu_type == 0x3 && apdu_data.len() >= 2 && apdu_data[1] == 0x0C {
-                                if let Ok(response) =
-                                    ReadPropertyResponse::decode(&apdu_data[2..])
+                            if resp_invoke_id == (invoke_id & 0x0F)
+                                && pdu_type == 0x3
+                                && apdu_data.len() >= 2
+                                && apdu_data[1] == 0x0C
+                            {
+                                if let Ok(response) = ReadPropertyResponse::decode(&apdu_data[2..])
                                 {
                                     return extract_string_value(&response.property_value);
                                 } else {

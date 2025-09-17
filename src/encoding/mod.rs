@@ -2188,7 +2188,15 @@ mod tests {
     #[test]
     fn test_encode_decode_real() {
         let mut buffer = Vec::new();
-        let test_values = [0.0, 1.0, -1.0, std::f32::consts::PI, -273.15, f32::MAX, f32::MIN];
+        let test_values = [
+            0.0,
+            1.0,
+            -1.0,
+            std::f32::consts::PI,
+            -273.15,
+            f32::MAX,
+            f32::MIN,
+        ];
 
         for &test_value in &test_values {
             buffer.clear();

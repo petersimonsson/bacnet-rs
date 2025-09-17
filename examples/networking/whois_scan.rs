@@ -77,7 +77,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for addr_str in &local_broadcasts {
         if let Ok(addr) = addr_str.parse::<SocketAddr>() {
-            if datalink.send_frame(&message, &DataLinkAddress::Ip(addr)).is_ok() {
+            if datalink
+                .send_frame(&message, &DataLinkAddress::Ip(addr))
+                .is_ok()
+            {
                 println!("Sent Who-Is to local broadcast: {}", addr);
             }
         }
@@ -114,7 +117,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // Process the received message
                 if let Some(device) = process_response(&data, source_addr) {
-                    if let std::collections::hash_map::Entry::Vacant(e) = discovered_devices.entry(device.device_id) {
+                    if let std::collections::hash_map::Entry::Vacant(e) =
+                        discovered_devices.entry(device.device_id)
+                    {
                         println!("Discovered new device:");
                         println!("  Device ID: {}", device.device_id);
                         println!("  Address: {}", device.address);

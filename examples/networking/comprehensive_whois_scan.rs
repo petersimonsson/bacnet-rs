@@ -171,8 +171,7 @@ fn discover_routers(
                     {
                         let mut idx = offset + 1;
                         while idx + 1 < npdu_data.len() {
-                            let network =
-                                u16::from_be_bytes([npdu_data[idx], npdu_data[idx + 1]]);
+                            let network = u16::from_be_bytes([npdu_data[idx], npdu_data[idx + 1]]);
                             routers.insert(network, src_addr);
                             idx += 2;
                         }
@@ -500,10 +499,10 @@ fn read_device_property(
 
     // Create ReadProperty request following the official BACnet C stack implementation
     let mut apdu = vec![
-        0x00, // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
-        0x05, // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
+        0x00,      // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
+        0x05,      // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
         invoke_id, // invoke_id
-        0x0C, // SERVICE_CONFIRMED_READ_PROPERTY (12)
+        0x0C,      // SERVICE_CONFIRMED_READ_PROPERTY (12)
     ];
 
     // ReadProperty Service Data - following read_property_request_encode()
@@ -578,9 +577,7 @@ fn try_read_object_list_multiple_approaches(
                         }
 
                         // Format 2: "Objects: [TYPE:instance]"
-                        if obj_response.starts_with("Objects: [")
-                            && obj_response.ends_with("]")
-                        {
+                        if obj_response.starts_with("Objects: [") && obj_response.ends_with("]") {
                             let objects_str = &obj_response[10..obj_response.len() - 1];
                             if let Some(colon_pos) = objects_str.find(':') {
                                 let type_str = &objects_str[..colon_pos];
@@ -654,8 +651,7 @@ fn read_device_property_simple(
     let mut apdu = vec![
         0x00, // Confirmed-Request
         0x05, // Max segments/APDU
-        invoke_id,
-        0x0C, // ReadProperty
+        invoke_id, 0x0C, // ReadProperty
     ];
 
     // Object ID for device
@@ -684,8 +680,7 @@ fn read_device_property_alternative(
     let mut apdu = vec![
         0x00, // Confirmed-Request
         0x00, // No segmentation, 50 byte APDU
-        invoke_id,
-        0x0C, // ReadProperty
+        invoke_id, 0x0C, // ReadProperty
     ];
 
     // Object ID for device
@@ -841,10 +836,10 @@ fn read_property_with_array_index(
 
     // Create ReadProperty request following the official BACnet C stack implementation
     let mut apdu = vec![
-        0x00, // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
-        0x05, // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
+        0x00,      // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
+        0x05,      // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
         invoke_id, // invoke_id
-        0x0C, // SERVICE_CONFIRMED_READ_PROPERTY (12)
+        0x0C,      // SERVICE_CONFIRMED_READ_PROPERTY (12)
     ];
 
     // ReadProperty Service Data - following read_property_request_encode()
@@ -898,8 +893,7 @@ fn read_object_property_simple(
     let mut apdu = vec![
         0x00, // Confirmed-Request
         0x05, // Max segments/APDU
-        invoke_id,
-        0x0C, // ReadProperty
+        invoke_id, 0x0C, // ReadProperty
     ];
 
     // Object ID
@@ -927,10 +921,10 @@ fn read_object_property(
 
     // Create ReadProperty request following the official BACnet C stack implementation
     let mut apdu = vec![
-        0x00, // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
-        0x05, // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
+        0x00,      // PDU_TYPE_CONFIRMED_SERVICE_REQUEST
+        0x05,      // encode_max_segs_max_apdu(0, MAX_APDU) - no segmentation, 1476 bytes
         invoke_id, // invoke_id
-        0x0C, // SERVICE_CONFIRMED_READ_PROPERTY (12)
+        0x0C,      // SERVICE_CONFIRMED_READ_PROPERTY (12)
     ];
 
     // ReadProperty Service Data - following read_property_request_encode()
