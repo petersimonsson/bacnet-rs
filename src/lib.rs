@@ -137,7 +137,6 @@ pub use object::{BacnetObject, ObjectType, PropertyIdentifier};
 pub use service::{ConfirmedServiceChoice, ServiceError, UnconfirmedServiceChoice};
 pub use vendor::{format_vendor_display, get_vendor_info, get_vendor_name, VendorInfo};
 
-
 /// BACnet protocol version as defined in ASHRAE 135
 pub const BACNET_PROTOCOL_VERSION: u8 = 1;
 
