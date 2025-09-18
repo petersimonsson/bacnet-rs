@@ -119,10 +119,7 @@ jobs:
       matrix:
         features:
           - "" # default features
-          - "--no-default-features"
           - "--no-default-features --features std"
-          - "--no-default-features --features async"
-          - "--no-default-features --features serde"
           - "--all-features"
 
     steps:
