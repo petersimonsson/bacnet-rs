@@ -93,6 +93,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(missing_docs)]
 
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
 /// Application layer protocol services and message handling
 pub mod app;
 
