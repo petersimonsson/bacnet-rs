@@ -10,8 +10,8 @@ This library provides a complete implementation of the BACnet protocol stack in 
 
 - **Complete BACnet Implementation**: All standard objects, services, and data types
 - **Multiple Data Links**: BACnet/IP, MS/TP, Ethernet support
-- **No-std Compatible**: Can run on embedded systems without standard library
-- **Async Support**: Optional async/await support for network operations
+- **Embedded Ready**: Designed for resource-constrained environments
+- **Async Support**: Optional async/await support with Tokio for network operations
 - **Type Safe**: Leverages Rust's type system to prevent protocol errors
 - **High Performance**: Zero-copy design with minimal allocations
 
@@ -22,6 +22,17 @@ Add this to your `Cargo.toml`:
 ```toml
 [dependencies]
 bacnet-rs = "0.2"
+```
+
+### Feature Flags
+
+- `std` (default): Standard library support with networking capabilities
+- `async` (default): Async/await support with Tokio runtime
+- `serde` (default): Serialization support for BACnet types
+
+To use without async support:
+```toml
+bacnet-rs = { version = "0.2", default-features = false, features = ["std"] }
 ```
 
 ## Architecture

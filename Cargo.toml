@@ -10,7 +10,7 @@ repository = "https://github.com/Heliopshan/bacnet-rs"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["bacnet", "building-automation", "protocol", "networking", "iot"]
-categories = ["network-programming", "embedded", "no-std::no-alloc"]
+categories = ["network-programming", "embedded"]
 
 [dependencies]
 # Core dependencies
