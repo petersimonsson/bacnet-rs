@@ -839,6 +839,7 @@ impl BroadcastManager {
         self.bdt.clear();
 
         let entry_size = 10; // 4 bytes IP + 2 bytes port + 4 bytes mask
+        #[allow(unknown_lints, clippy::manual_is_multiple_of)]
         if data.len() % entry_size != 0 {
             return Err(TransportError::InvalidBvll(
                 "Invalid BDT data length".into(),
