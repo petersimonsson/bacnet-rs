@@ -1566,7 +1566,7 @@ fn parse_bacnet_application_tag(data: &[u8]) -> Result<String, Box<dyn std::erro
                     }
                     3 | 4 => {
                         // ISO 10646 (UCS-2) or ISO 10646 (UCS-4)
-                        if string_data.len() % 2 == 0 {
+                        if string_data.len().is_multiple_of(2) {
                             let mut utf16_values = Vec::new();
                             for i in (0..string_data.len()).step_by(2) {
                                 let value =

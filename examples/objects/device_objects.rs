@@ -421,8 +421,8 @@ fn is_likely_router_device_id(device_id: u32) -> bool {
     device_id < 100 ||             // Low device IDs often routers and infrastructure
     (4000..=6000).contains(&device_id) || // Common router/converter range
     (999990..=999999).contains(&device_id) || // High-end Niagara router range
-    device_id % 1000 == 0 ||       // Round numbers often infrastructure
-    device_id % 100 == 0 ||        // Niagara controllers often use round numbers
+    device_id.is_multiple_of(1000) ||       // Round numbers often infrastructure
+    device_id.is_multiple_of(100) ||        // Niagara controllers often use round numbers
     (1000..=1099).contains(&device_id) || // Common Niagara JACE range
     (2000..=2099).contains(&device_id) || // Another common Niagara range
     (10000..=10099).contains(&device_id) || // Enterprise Niagara range
@@ -1262,7 +1262,7 @@ fn extract_character_string(data: &[u8]) -> Option<(String, usize)> {
         }
         4 => {
             // UTF-16 (UCS-2) encoding
-            if string_data.len() % 2 != 0 {
+            if !string_data.len().is_multiple_of(2) {
                 return None; // UTF-16 must have even number of bytes
             }
             let mut utf16_chars = Vec::new();
