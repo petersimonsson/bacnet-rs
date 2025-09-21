@@ -1106,9 +1106,10 @@ pub mod advanced {
         use super::*;
 
         /// Encode a bit string
+        #[allow(clippy::manual_is_multiple_of)]
         pub fn encode_bit_string(buffer: &mut Vec<u8>, bits: &[bool]) -> Result<()> {
             let byte_count = bits.len().div_ceil(8);
-            let unused_bits = if bits.len().is_multiple_of(8) {
+            let unused_bits = if bits.len() % 8 == 0 {
                 0
             } else {
                 8 - (bits.len() % 8)

@@ -1117,8 +1117,6 @@ pub struct SupportedServices {
 
 impl Default for SupportedServices {
     fn default() -> Self {
-        use crate::service::{ConfirmedServiceChoice, UnconfirmedServiceChoice};
-
         Self {
             confirmed: vec![
                 ConfirmedServiceChoice::ReadProperty,
@@ -1255,7 +1253,6 @@ impl ApplicationLayerHandler {
         self.stats.confirmed_requests += 1;
 
         // Check if service is supported
-        use crate::service::ConfirmedServiceChoice;
         let service = match service_choice {
             6 => ConfirmedServiceChoice::AtomicReadFile,
             7 => ConfirmedServiceChoice::AtomicWriteFile,
@@ -1325,7 +1322,6 @@ impl ApplicationLayerHandler {
         self.stats.unconfirmed_requests += 1;
 
         // Unconfirmed requests don't get responses unless it's I-Am for Who-Is
-        use crate::service::UnconfirmedServiceChoice;
         let service = match service_choice {
             0 => UnconfirmedServiceChoice::IAm,
             1 => UnconfirmedServiceChoice::IHave,

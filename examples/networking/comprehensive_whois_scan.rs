@@ -1416,6 +1416,7 @@ fn parse_units_from_response(response: &str) -> Result<String, Box<dyn std::erro
 }
 
 // Parse BACnet application tags according to the protocol specification
+#[allow(clippy::manual_is_multiple_of)]
 fn parse_bacnet_application_tag(data: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
     if data.is_empty() {
         return Err("Empty data".into());
@@ -1566,7 +1567,7 @@ fn parse_bacnet_application_tag(data: &[u8]) -> Result<String, Box<dyn std::erro
                     }
                     3 | 4 => {
                         // ISO 10646 (UCS-2) or ISO 10646 (UCS-4)
-                        if string_data.len().is_multiple_of(2) {
+                        if string_data.len() % 2 == 0 {
                             let mut utf16_values = Vec::new();
                             for i in (0..string_data.len()).step_by(2) {
                                 let value =

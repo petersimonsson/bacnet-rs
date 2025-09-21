@@ -835,11 +835,12 @@ impl BroadcastManager {
     }
 
     /// Decode BDT from received data
+    #[allow(clippy::manual_is_multiple_of)]
     pub fn decode_bdt(&mut self, data: &[u8]) -> Result<()> {
         self.bdt.clear();
 
         let entry_size = 10; // 4 bytes IP + 2 bytes port + 4 bytes mask
-        if !data.len().is_multiple_of(entry_size) {
+        if data.len() % entry_size != 0 {
             return Err(TransportError::InvalidBvll(
                 "Invalid BDT data length".into(),
             ));

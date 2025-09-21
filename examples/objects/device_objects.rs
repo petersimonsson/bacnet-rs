@@ -415,14 +415,15 @@ fn process_iam_response_with_routing(data: &[u8], source: SocketAddr) -> Option<
 }
 
 /// Check if a device ID is likely to be a router/gateway (enhanced for Niagara and RS485)
+#[allow(clippy::manual_is_multiple_of)]
 fn is_likely_router_device_id(device_id: u32) -> bool {
     // Enhanced patterns for router/gateway devices including Niagara controllers
     device_id == 5046 ||           // Specific IP-RS485 converter mentioned by user
     device_id < 100 ||             // Low device IDs often routers and infrastructure
     (4000..=6000).contains(&device_id) || // Common router/converter range
     (999990..=999999).contains(&device_id) || // High-end Niagara router range
-    device_id.is_multiple_of(1000) ||       // Round numbers often infrastructure
-    device_id.is_multiple_of(100) ||        // Niagara controllers often use round numbers
+    device_id % 1000 == 0 ||       // Round numbers often infrastructure
+    device_id % 100 == 0 ||        // Niagara controllers often use round numbers
     (1000..=1099).contains(&device_id) || // Common Niagara JACE range
     (2000..=2099).contains(&device_id) || // Another common Niagara range
     (10000..=10099).contains(&device_id) || // Enterprise Niagara range
@@ -1240,6 +1241,7 @@ fn parse_rpm_response(
 
 /// Extract character string from BACnet encoded data
 #[allow(dead_code)]
+#[allow(clippy::manual_is_multiple_of)]
 fn extract_character_string(data: &[u8]) -> Option<(String, usize)> {
     if data.len() < 2 || data[0] != 0x75 {
         // Character string tag
@@ -1262,7 +1264,7 @@ fn extract_character_string(data: &[u8]) -> Option<(String, usize)> {
         }
         4 => {
             // UTF-16 (UCS-2) encoding
-            if !string_data.len().is_multiple_of(2) {
+            if string_data.len() % 2 != 0 {
                 return None; // UTF-16 must have even number of bytes
             }
             let mut utf16_chars = Vec::new();
