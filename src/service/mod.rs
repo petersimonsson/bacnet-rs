@@ -246,10 +246,17 @@ pub enum ConfirmedServiceChoice {
     VtClose = 22,
     VtData = 23,
 
+    // Security Services
+    Authenticate = 24,
+    RequestKey = 25,
+
     // Other Services
     ReadRange = 26,
     SubscribeCOV = 5,
     SubscribeCOVProperty = 28,
+
+    // Protocol Revision 30 - Security Services
+    AuthRequest = 34,
 }
 
 /// Unconfirmed service choices

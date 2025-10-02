@@ -280,6 +280,38 @@ impl MstpFrame {
 }
 
 /// MS/TP node state
+///
+/// # Important Implementation Note: WAIT_FOR_REPLY State
+///
+/// When implementing the state machine, the WAIT_FOR_REPLY state must use a "negative list"
+/// approach to handle frame reception (fix from bacnet-stack commit f877ca0eb):
+///
+/// **Problem:** Previous implementations only accepted specific known reply frame types,
+/// which caused segmented Complex-ACK frames and proprietary frames to be dropped.
+///
+/// **Solution:** Accept any frame that is NOT explicitly a non-reply frame:
+/// - Reject only: Token, PollForMaster, ReplyToPollForMaster, TestRequest
+/// - Accept everything else as potential replies (including Complex-ACK segments, proprietary frames)
+///
+/// ```rust,ignore
+/// // Correct implementation:
+/// match frame.frame_type {
+///     // Known non-reply frames - reject
+///     MstpFrameType::Token |
+///     MstpFrameType::PollForMaster |
+///     MstpFrameType::ReplyToPollForMaster |
+///     MstpFrameType::TestRequest => {
+///         // ReceivedUnexpectedFrame - go to Idle
+///         self.state = MstpState::Idle;
+///     }
+///     // All other frames accepted as replies (including unknown/proprietary)
+///     _ => {
+///         // ReceivedReply - pass to higher layers
+///         self.put_receive(&frame);
+///         self.state = MstpState::DoneWithToken;
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MstpState {
     /// Initialize state
@@ -288,8 +320,15 @@ pub enum MstpState {
     Idle,
     /// Use token state
     UseToken,
+    /// Wait for reply state (after sending a frame expecting reply)
+    /// See enum documentation for critical implementation details
+    WaitForReply,
     /// Pass token state
     PassToken,
+    /// No token state
+    NoToken,
+    /// Poll for master state
+    PollForMaster,
     /// Answer data request state
     AnswerDataRequest,
     /// Done with token state

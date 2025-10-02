@@ -141,6 +141,10 @@ pub type Result<T> = core::result::Result<T, ObjectError>;
 pub enum ObjectError {
     /// Object not found
     NotFound,
+    /// Object instance not found
+    InstanceNotFound,
+    /// Object type not supported
+    TypeNotSupported,
     /// Property not found
     PropertyNotFound,
     /// Unknown property
@@ -161,6 +165,8 @@ impl fmt::Display for ObjectError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ObjectError::NotFound => write!(f, "Object not found"),
+            ObjectError::InstanceNotFound => write!(f, "Object instance not found"),
+            ObjectError::TypeNotSupported => write!(f, "Object type not supported"),
             ObjectError::PropertyNotFound => write!(f, "Property not found"),
             ObjectError::UnknownProperty => write!(f, "Unknown property"),
             ObjectError::PropertyNotWritable => write!(f, "Property not writable"),
@@ -306,6 +312,20 @@ pub enum PropertyIdentifier {
     ProgramState = 92,
     ProportionalConstant = 93,
     ProportionalConstantUnits = 94,
+    // Protocol Revision 30 - Authentication/Authorization Properties
+    AuthenticationFactors = 257,
+    AuthenticationPolicyList = 258,
+    AuthenticationPolicyNames = 259,
+    AuthenticationStatus = 260,
+    AuthorizationMode = 261,
+    AuthorizationExemptions = 364,
+    // Reserved range properties (Protocol Revision 30)
+    AuthorizationCache = 4194343,
+    AuthorizationGroups = 4194344,
+    AuthorizationPolicy = 4194345,
+    AuthorizationScope = 4194346,
+    AuthorizationServer = 4194347,
+    AuthorizationStatus = 4194348,
     // ... continues with many more properties
 }
 
@@ -707,6 +727,8 @@ pub mod binary;
 /// Object database for managing BACnet objects
 #[cfg(feature = "std")]
 pub mod database;
+/// Device object and object functions API
+pub mod device;
 /// File object type
 pub mod file;
 /// Multi-state object types (MSI, MSO, MSV)
@@ -716,6 +738,7 @@ pub use analog::{
     AnalogInput, AnalogOutput, AnalogValue, EngineeringUnits, EventState, Reliability,
 };
 pub use binary::{BinaryInput, BinaryOutput, BinaryPV, BinaryValue, Polarity};
+pub use device::{DeviceObject, ObjectFunctions};
 pub use file::{File, FileAccessMethod};
 pub use multistate::{MultiStateInput, MultiStateOutput, MultiStateValue};
 
