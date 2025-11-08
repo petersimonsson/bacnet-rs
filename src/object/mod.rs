@@ -729,16 +729,17 @@ pub mod binary;
 pub mod database;
 /// Device object and object functions API
 pub mod device;
+/// Engineering units enumeration
+pub mod engineering_units;
 /// File object type
 pub mod file;
 /// Multi-state object types (MSI, MSO, MSV)
 pub mod multistate;
 
-pub use analog::{
-    AnalogInput, AnalogOutput, AnalogValue, EngineeringUnits, EventState, Reliability,
-};
+pub use analog::{AnalogInput, AnalogOutput, AnalogValue, EventState, Reliability};
 pub use binary::{BinaryInput, BinaryOutput, BinaryPV, BinaryValue, Polarity};
 pub use device::{DeviceObject, ObjectFunctions};
+pub use engineering_units::EngineeringUnits;
 pub use file::{File, FileAccessMethod};
 pub use multistate::{MultiStateInput, MultiStateOutput, MultiStateValue};
 

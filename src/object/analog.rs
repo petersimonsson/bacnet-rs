@@ -4,8 +4,8 @@
 //! as defined in ASHRAE 135. These objects represent analog (continuous) values in BACnet.
 
 use crate::object::{
-    BacnetObject, ObjectError, ObjectIdentifier, ObjectType, PropertyIdentifier, PropertyValue,
-    Result,
+    engineering_units::EngineeringUnits, BacnetObject, ObjectError, ObjectIdentifier, ObjectType,
+    PropertyIdentifier, PropertyValue, Result,
 };
 
 #[cfg(not(feature = "std"))]
@@ -139,29 +139,7 @@ pub enum Reliability {
     ConfigurationError = 10,
 }
 
-/// Engineering Units enumeration (subset)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum EngineeringUnits {
-    NoUnits = 95,
-    Percent = 98,
-    DegreesCelsius = 62,
-    DegreesFahrenheit = 64,
-    DegreesKelvin = 63,
-    Volts = 5,
-    Millivolts = 124,
-    Amperes = 2,
-    Milliamperes = 119,
-    Ohms = 4,
-    Watts = 47,
-    Kilowatts = 48,
-    Pascals = 53,
-    Kilopascals = 54,
-    MetersPerSecond = 74,
-    KilometersPerHour = 75,
-    CubicMetersPerSecond = 85,
-    LitersPerSecond = 126,
-}
+// EngineeringUnits enum moved to src/object/engineering_units.rs for complete implementation
 
 impl AnalogInput {
     /// Create a new Analog Input object
