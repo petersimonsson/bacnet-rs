@@ -11,7 +11,7 @@
 /// Represents all engineering units defined in the BACnet standard.
 /// Values 0-255 and 47808-49999 are reserved for definition by ASHRAE.
 /// Values 256-47807 and 50000-65535 may be used by others.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u32)]
 pub enum EngineeringUnits {
     // Acceleration
@@ -270,6 +270,7 @@ pub enum EngineeringUnits {
     MegajoulesPerSquareMeter = 139,
     MegajoulesPerSquareFoot = 140,
     MolePercent = 252,
+    #[default]
     NoUnits = 95,
     NewtonSeconds = 187,
     NewtonsPerMeter = 188,
@@ -624,12 +625,6 @@ impl EngineeringUnits {
             }
             _ => "Other",
         }
-    }
-}
-
-impl Default for EngineeringUnits {
-    fn default() -> Self {
-        Self::NoUnits
     }
 }
 
