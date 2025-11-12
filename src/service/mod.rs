@@ -305,6 +305,7 @@ impl TryFrom<u8> for ConfirmedServiceChoice {
 pub enum UnconfirmedServiceChoice {
     IAm = 0,
     IHave = 1,
+    UnconfirmedCOVNotification = 2,
     UnconfirmedEventNotification = 3,
     UnconfirmedPrivateTransfer = 4,
     UnconfirmedTextMessage = 5,
@@ -312,6 +313,11 @@ pub enum UnconfirmedServiceChoice {
     WhoHas = 7,
     WhoIs = 8,
     UtcTimeSynchronization = 9,
+    WriteGroup = 10,
+    UnconfirmedCOVNotificationMultiple = 11,
+    UnconfirmedAuditNotification = 12,
+    WhoAmI = 13,
+    YouAre = 14,
 }
 
 impl TryFrom<u8> for UnconfirmedServiceChoice {
@@ -319,14 +325,21 @@ impl TryFrom<u8> for UnconfirmedServiceChoice {
 
     fn try_from(value: u8) -> Result<Self> {
         match value {
-            0 => Ok(Self::IHave),
-            1 => Ok(Self::UnconfirmedEventNotification),
-            3 => Ok(Self::UnconfirmedPrivateTransfer),
-            4 => Ok(Self::UnconfirmedTextMessage),
+            0 => Ok(Self::IAm),
+            1 => Ok(Self::IHave),
+            2 => Ok(Self::UnconfirmedCOVNotification),
+            3 => Ok(Self::UnconfirmedEventNotification),
+            4 => Ok(Self::UnconfirmedPrivateTransfer),
+            5 => Ok(Self::UnconfirmedTextMessage),
             6 => Ok(Self::TimeSynchronization),
             7 => Ok(Self::WhoHas),
             8 => Ok(Self::WhoIs),
             9 => Ok(Self::UtcTimeSynchronization),
+            10 => Ok(Self::WriteGroup),
+            11 => Ok(Self::UnconfirmedCOVNotificationMultiple),
+            12 => Ok(Self::UnconfirmedAuditNotification),
+            13 => Ok(Self::WhoAmI),
+            14 => Ok(Self::YouAre),
             _ => Err(ServiceError::UnsupportedServiceChoice(value)),
         }
     }
