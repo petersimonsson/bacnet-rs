@@ -1205,7 +1205,7 @@ impl ApplicationLayerHandler {
             Apdu::UnconfirmedRequest {
                 service_choice,
                 service_data,
-            } => self.process_unconfirmed_request(*service_choice as u8, service_data),
+            } => self.process_unconfirmed_request(*service_choice, service_data),
             Apdu::SimpleAck {
                 invoke_id,
                 service_choice,
@@ -1306,27 +1306,13 @@ impl ApplicationLayerHandler {
     /// Process an unconfirmed request
     fn process_unconfirmed_request(
         &mut self,
-        service_choice: u8,
+        service_choice: UnconfirmedServiceChoice,
         service_data: &[u8],
     ) -> Result<Option<Apdu>> {
         self.stats.unconfirmed_requests += 1;
 
         // Unconfirmed requests don't get responses unless it's I-Am for Who-Is
-        let service = match service_choice {
-            0 => UnconfirmedServiceChoice::IAm,
-            1 => UnconfirmedServiceChoice::IHave,
-            2 => UnconfirmedServiceChoice::UnconfirmedEventNotification,
-            3 => UnconfirmedServiceChoice::UnconfirmedEventNotification,
-            4 => UnconfirmedServiceChoice::UnconfirmedPrivateTransfer,
-            5 => UnconfirmedServiceChoice::UnconfirmedTextMessage,
-            6 => UnconfirmedServiceChoice::TimeSynchronization,
-            7 => UnconfirmedServiceChoice::WhoHas,
-            8 => UnconfirmedServiceChoice::WhoIs,
-            9 => UnconfirmedServiceChoice::UtcTimeSynchronization,
-            _ => return Ok(None),
-        };
-
-        if service == UnconfirmedServiceChoice::WhoIs {
+        if service_choice == UnconfirmedServiceChoice::WhoIs {
             if let Some(ref processor) = self.service_processors.who_is {
                 if let Ok(Some(response_data)) = processor(service_data) {
                     return Ok(Some(Apdu::UnconfirmedRequest {
