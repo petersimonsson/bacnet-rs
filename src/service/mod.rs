@@ -90,7 +90,7 @@
 //!
 //! // Create a read property request
 //! let object_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
-//! let request = ReadPropertyRequest::new(object_id, PropertyIdentifier::PresentValue.into());
+//! let request = ReadPropertyRequest::new(object_id, PropertyIdentifier::PresentValue);
 //!
 //! // This would be sent as a confirmed service
 //! let service_choice = ConfirmedServiceChoice::ReadProperty;
@@ -376,7 +376,9 @@ use crate::encoding::{
     encode_context_object_id, encode_context_unsigned, encode_enumerated, encode_object_identifier,
     encode_unsigned, Result as EncodingResult,
 };
-use crate::object::{ObjectError, ObjectIdentifier, PropertyValue, Segmentation};
+use crate::object::{
+    ObjectError, ObjectIdentifier, PropertyIdentifier, PropertyValue, Segmentation,
+};
 use crate::EncodingError;
 
 /// Special array index value indicating all elements
@@ -573,14 +575,17 @@ pub struct ReadPropertyRequest {
     /// Object identifier to read from
     pub object_identifier: ObjectIdentifier,
     /// Property identifier to read
-    pub property_identifier: u32,
+    pub property_identifier: PropertyIdentifier,
     /// Property array index (optional)
     pub property_array_index: Option<u32>,
 }
 
 impl ReadPropertyRequest {
     /// Create a new Read Property request
-    pub fn new(object_identifier: ObjectIdentifier, property_identifier: u32) -> Self {
+    pub fn new(
+        object_identifier: ObjectIdentifier,
+        property_identifier: PropertyIdentifier,
+    ) -> Self {
         Self {
             object_identifier,
             property_identifier,
@@ -591,7 +596,7 @@ impl ReadPropertyRequest {
     /// Create a new Read Property request with array index
     pub fn with_array_index(
         object_identifier: ObjectIdentifier,
-        property_identifier: u32,
+        property_identifier: PropertyIdentifier,
         array_index: u32,
     ) -> Self {
         Self {
@@ -608,7 +613,7 @@ impl ReadPropertyRequest {
         buffer.extend_from_slice(&obj_id_bytes);
 
         // Property identifier - context tag 1 (as enumerated)
-        let prop_id_bytes = encode_context_enumerated(self.property_identifier, 1)?;
+        let prop_id_bytes = encode_context_enumerated(self.property_identifier.into(), 1)?;
         buffer.extend_from_slice(&prop_id_bytes);
 
         // Property array index - context tag 2 (optional)
@@ -619,6 +624,27 @@ impl ReadPropertyRequest {
 
         Ok(())
     }
+
+    pub fn decode(buffer: &[u8]) -> EncodingResult<Self> {
+        let mut offset = 0;
+        let (object_identifier, consumed) = decode_context_object_id(&buffer[offset..], 0)?;
+        offset += consumed;
+        let (property_identifier, consumed) = decode_context_enumerated(&buffer[offset..], 1)?;
+        offset += consumed;
+
+        let property_array_index = if offset < buffer.len() {
+            let (array_index, _) = decode_context_unsigned(&buffer[offset..], 2)?;
+            Some(array_index)
+        } else {
+            None
+        };
+
+        Ok(Self {
+            object_identifier,
+            property_identifier: property_identifier.into(),
+            property_array_index,
+        })
+    }
 }
 
 /// Read Property response (confirmed service)
@@ -627,7 +653,7 @@ pub struct ReadPropertyResponse {
     /// Object identifier that was read
     pub object_identifier: ObjectIdentifier,
     /// Property identifier that was read
-    pub property_identifier: u32,
+    pub property_identifier: PropertyIdentifier,
     /// Property array index (optional)
     pub property_array_index: Option<u32>,
     /// Property value
@@ -638,7 +664,7 @@ impl ReadPropertyResponse {
     /// Create a new Read Property response
     pub fn new(
         object_identifier: ObjectIdentifier,
-        property_identifier: u32,
+        property_identifier: PropertyIdentifier,
         property_value: Vec<u8>,
     ) -> Self {
         Self {
@@ -698,10 +724,31 @@ impl ReadPropertyResponse {
 
         Ok(ReadPropertyResponse {
             object_identifier,
-            property_identifier,
+            property_identifier: property_identifier.into(),
             property_array_index,
             property_value,
         })
+    }
+
+    pub fn encode(&self, buffer: &mut Vec<u8>) -> EncodingResult<()> {
+        let object_id = encode_context_object_id(self.object_identifier, 0)?;
+        buffer.extend_from_slice(&object_id);
+
+        let prop_id = encode_context_enumerated(self.property_identifier.into(), 1)?;
+        buffer.extend_from_slice(&prop_id);
+
+        // Property array index - context tag 2 (optional)
+        if let Some(array_index) = self.property_array_index {
+            let array_bytes = encode_context_unsigned(array_index, 2)?;
+            buffer.extend_from_slice(&array_bytes);
+        }
+
+        // Property value - context tag 3 (opening tag)
+        buffer.push(0x3E); // Context tag 3, opening tag
+        buffer.extend_from_slice(&self.property_value);
+        buffer.push(0x3F); // Context tag 3, closing tag
+
+        Ok(())
     }
 }
 
@@ -1838,13 +1885,17 @@ mod tests {
     #[test]
     fn test_read_property_request() {
         let object_id = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
-        let read_prop = ReadPropertyRequest::new(object_id, 85); // Present Value
+        let read_prop = ReadPropertyRequest::new(object_id, PropertyIdentifier::PresentValue); // Present Value
 
         assert_eq!(read_prop.object_identifier.instance, 1);
-        assert_eq!(read_prop.property_identifier, 85);
+        assert_eq!(
+            read_prop.property_identifier,
+            PropertyIdentifier::PresentValue
+        );
         assert_eq!(read_prop.property_array_index, None);
 
-        let read_prop_array = ReadPropertyRequest::with_array_index(object_id, 85, 0);
+        let read_prop_array =
+            ReadPropertyRequest::with_array_index(object_id, PropertyIdentifier::PresentValue, 0);
         assert_eq!(read_prop_array.property_array_index, Some(0));
     }
 
