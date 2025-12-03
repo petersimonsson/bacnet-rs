@@ -21,7 +21,7 @@ use std::{
 struct DiscoveredDevice {
     device_id: u32,
     address: SocketAddr,
-    vendor_id: u32,
+    vendor_id: u16,
     vendor_name: String,
     max_apdu: u32,
     segmentation: Segmentation,
