@@ -27,7 +27,7 @@ struct BACnetDevice {
     mac_address: Vec<u8>,
     socket_addr: SocketAddr,
     #[allow(dead_code)]
-    vendor_id: u32,
+    vendor_id: u16,
     vendor_name: String,
     max_apdu: u32,
     segmentation: Segmentation,
