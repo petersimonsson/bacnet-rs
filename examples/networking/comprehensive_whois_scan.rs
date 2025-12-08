@@ -23,8 +23,7 @@ const BACNET_PORT: u16 = 0xBAC0; // 47808
 #[derive(Debug, Clone)]
 struct BACnetDevice {
     device_id: u32,
-    network_number: u16,
-    mac_address: Vec<u8>,
+    bacnet_address: NetworkAddress,
     socket_addr: SocketAddr,
     #[allow(dead_code)]
     vendor_id: u16,
@@ -103,10 +102,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n📱 Discovered {} device(s):", devices.len());
     for device in devices.values() {
-        let network_info = if device.network_number == 0 {
+        let network_info = if device.bacnet_address.network == 0 {
             "Local".to_string()
         } else {
-            format!("Network {}", device.network_number)
+            format!("Network {}", device.bacnet_address.network)
         };
         println!(
             "   Device {:>4}: {} ({})",
@@ -226,7 +225,7 @@ fn discover_devices_on_network(
     npdu.control.destination_present = true;
     npdu.destination = Some(NetworkAddress {
         network,
-        address: vec![], // Broadcast
+        address: None, // Broadcast
     });
     npdu.hop_count = Some(255);
 
@@ -265,12 +264,8 @@ fn collect_i_am_responses(
                                 if let Ok(i_am) = IAmRequest::decode(&apdu_data[2..]) {
                                     let device_id = i_am.device_identifier.instance;
 
-                                    let (network_number, mac_address) =
-                                        if let Some(src_net) = npdu.source {
-                                            (src_net.network, src_net.address)
-                                        } else {
-                                            (0, vec![])
-                                        };
+                                    let src_net =
+                                        npdu.source.unwrap_or(NetworkAddress::new(0, None));
 
                                     let vendor_name =
                                         get_vendor_name(i_am.vendor_identifier as u16)
@@ -278,8 +273,7 @@ fn collect_i_am_responses(
 
                                     let device = BACnetDevice {
                                         device_id,
-                                        network_number,
-                                        mac_address,
+                                        bacnet_address: src_net,
                                         socket_addr: src_addr,
                                         vendor_id: i_am.vendor_identifier,
                                         vendor_name: vendor_name.to_string(),
@@ -320,10 +314,10 @@ fn analyze_device(
     );
     println!(
         "   Network: {}, Address: {}",
-        if device.network_number == 0 {
+        if device.bacnet_address.network == 0 {
             "Local".to_string()
         } else {
-            device.network_number.to_string()
+            device.bacnet_address.network.to_string()
         },
         device.socket_addr
     );
@@ -955,12 +949,9 @@ fn send_request_and_get_response(
     let mut npdu = Npdu::new();
     npdu.control.expecting_reply = true;
 
-    if device.network_number != 0 {
+    if device.bacnet_address.network != 0 {
         npdu.control.destination_present = true;
-        npdu.destination = Some(NetworkAddress {
-            network: device.network_number,
-            address: device.mac_address.clone(),
-        });
+        npdu.destination = Some(device.bacnet_address);
         npdu.hop_count = Some(255);
     }
 
@@ -1033,7 +1024,7 @@ fn display_comprehensive_summary(devices: &HashMap<u32, BACnetDevice>) {
     println!("   Total Devices: {}", devices.len());
     println!("   Total Objects: {}", total_objects);
 
-    let mut networks: Vec<u16> = devices.values().map(|d| d.network_number).collect();
+    let mut networks: Vec<u16> = devices.values().map(|d| d.bacnet_address.network).collect();
     networks.sort();
     networks.dedup();
     println!(
@@ -1049,10 +1040,10 @@ fn display_comprehensive_summary(devices: &HashMap<u32, BACnetDevice>) {
     println!("{}", "=".repeat(80));
 
     for device in devices.values() {
-        let network_info = if device.network_number == 0 {
+        let network_info = if device.bacnet_address.network == 0 {
             "Local".to_string()
         } else {
-            format!("Network {}", device.network_number)
+            format!("Network {}", device.bacnet_address.network)
         };
 
         println!(

@@ -22,8 +22,7 @@ const BACNET_PORT: u16 = 0xBAC0; // 47808
 #[derive(Debug, Clone)]
 struct RemoteDevice {
     device_id: u32,
-    network_number: u16,
-    mac_address: Vec<u8>,
+    bacnet_address: NetworkAddress,
     socket_addr: SocketAddr,
     #[allow(dead_code)]
     vendor_id: Option<u16>,
@@ -103,7 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for device in devices.values() {
         println!(
             "  - Device {} on Network {} (MAC: {:02X?})",
-            device.device_id, device.network_number, device.mac_address
+            device.device_id, device.bacnet_address.network, device.bacnet_address.address
         );
     }
 
@@ -112,7 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for device in devices.values_mut() {
         println!(
             "\nReading Device {} on Network {}:",
-            device.device_id, device.network_number
+            device.device_id, device.bacnet_address.network
         );
         read_device_properties(&socket, device);
     }
@@ -122,8 +121,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("========================");
     for device in devices.values() {
         println!("\nDevice ID: {}", device.device_id);
-        println!("  Network: {}", device.network_number);
-        println!("  MAC Address: {:02X?}", device.mac_address);
+        println!("  Network: {}", device.bacnet_address.network);
+        println!("  MAC Address: {:02X?}", device.bacnet_address.address);
         println!("  Socket Address: {}", device.socket_addr);
         if let Some(name) = &device.vendor_name {
             println!("  Vendor: {}", name);
@@ -279,7 +278,7 @@ fn discover_devices_on_network(
     npdu.control.destination_present = true;
     npdu.destination = Some(NetworkAddress {
         network,
-        address: vec![], // Empty for broadcast
+        address: None, // Empty for broadcast
     });
     npdu.hop_count = Some(255);
 
@@ -330,21 +329,15 @@ fn collect_i_am_responses(
                                         let device_id = i_am.device_identifier.instance;
 
                                         // Determine network number and MAC address
-                                        let (network_number, mac_address) =
-                                            if let Some(src_net) = npdu.source {
-                                                (src_net.network, src_net.address)
-                                            } else {
-                                                // Local network
-                                                (0, vec![])
-                                            };
+                                        let src_net =
+                                            npdu.source.unwrap_or(NetworkAddress::new(0, None));
 
                                         let vendor_name =
                                             get_vendor_name(i_am.vendor_identifier as u16);
 
                                         let device = RemoteDevice {
                                             device_id,
-                                            network_number,
-                                            mac_address,
+                                            bacnet_address: src_net,
                                             socket_addr: src_addr,
                                             vendor_id: Some(i_am.vendor_identifier),
                                             vendor_name: vendor_name.map(|s| s.to_string()),
@@ -534,12 +527,9 @@ fn read_property(
     let mut npdu = Npdu::new();
     npdu.control.expecting_reply = true;
 
-    if device.network_number != 0 {
+    if device.bacnet_address.network != 0 {
         npdu.control.destination_present = true;
-        npdu.destination = Some(NetworkAddress {
-            network: device.network_number,
-            address: device.mac_address.clone(),
-        });
+        npdu.destination = Some(device.bacnet_address);
         npdu.hop_count = Some(255);
     }
 
@@ -884,12 +874,9 @@ fn read_object_property(
     let mut npdu = Npdu::new();
     npdu.control.expecting_reply = true;
 
-    if device.network_number != 0 {
+    if device.bacnet_address.network != 0 {
         npdu.control.destination_present = true;
-        npdu.destination = Some(NetworkAddress {
-            network: device.network_number,
-            address: device.mac_address.clone(),
-        });
+        npdu.destination = Some(device.bacnet_address);
         npdu.hop_count = Some(255);
     }
 
@@ -991,12 +978,9 @@ fn read_property_with_array_index(
     let mut npdu = Npdu::new();
     npdu.control.expecting_reply = true;
 
-    if device.network_number != 0 {
+    if device.bacnet_address.network != 0 {
         npdu.control.destination_present = true;
-        npdu.destination = Some(NetworkAddress {
-            network: device.network_number,
-            address: device.mac_address.clone(),
-        });
+        npdu.destination = Some(device.bacnet_address);
         npdu.hop_count = Some(255);
     }
 
