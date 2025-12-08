@@ -189,18 +189,26 @@ impl NpduControl {
 }
 
 /// Network address (network number + MAC address)
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NetworkAddress {
     /// Network number (0 = local network, 65535 = broadcast)
     pub network: u16,
     /// MAC address on that network
-    pub address: Vec<u8>,
+    pub address: Option<[u8; 6]>,
 }
 
 impl NetworkAddress {
     /// Create a new network address
-    pub fn new(network: u16, address: Vec<u8>) -> Self {
+    pub fn new(network: u16, address: Option<[u8; 6]>) -> Self {
         Self { network, address }
+    }
+
+    /// Create a broadcast address
+    pub fn broadcast() -> Self {
+        Self {
+            network: 0xFFFF,
+            address: None,
+        }
     }
 
     /// Check if this is a broadcast address
@@ -211,6 +219,52 @@ impl NetworkAddress {
     /// Check if this is a local network address
     pub fn is_local(&self) -> bool {
         self.network == 0
+    }
+
+    pub fn parse(data: &[u8]) -> Result<(Self, usize)> {
+        if data.len() < 3 {
+            return Err(NetworkError::InvalidNpdu(
+                "Invalid BACnet address".to_string(),
+            ));
+        }
+
+        let mut pos = 0;
+        let network = u16::from_be_bytes([data[pos], data[pos + 1]]);
+        pos += 2;
+
+        let addr_len = data[pos] as usize;
+        pos += 1;
+
+        if pos + addr_len > data.len() || addr_len > 6 {
+            return Err(NetworkError::InvalidNpdu(
+                "Invalid BACnet address length".to_string(),
+            ));
+        }
+
+        let address = if addr_len != 0 {
+            let mut address = [0u8; 6];
+            address.copy_from_slice(&data[pos..pos + addr_len]);
+            Some(address)
+        } else {
+            None
+        };
+        pos += addr_len;
+
+        Ok((Self { network, address }, pos))
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(&self.network.to_be_bytes());
+
+        if let Some(ref dest) = self.address {
+            buffer.push(dest.len() as u8);
+            buffer.extend_from_slice(dest);
+        } else {
+            buffer.push(0);
+        }
+
+        buffer
     }
 }
 
@@ -252,10 +306,7 @@ impl Npdu {
                 expecting_reply: false, // YABE uses 0x20 (no expecting_reply bit)
                 priority: 0,
             },
-            destination: Some(NetworkAddress {
-                network: 0xFFFF,
-                address: vec![],
-            }),
+            destination: Some(NetworkAddress::broadcast()),
             source: None,
             hop_count: Some(255),
         }
@@ -291,16 +342,12 @@ impl Npdu {
 
         // Destination network address
         if let Some(ref dest) = self.destination {
-            buffer.extend_from_slice(&dest.network.to_be_bytes());
-            buffer.push(dest.address.len() as u8);
-            buffer.extend_from_slice(&dest.address);
+            buffer.extend_from_slice(&dest.encode());
         }
 
         // Source network address
         if let Some(ref src) = self.source {
-            buffer.extend_from_slice(&src.network.to_be_bytes());
-            buffer.push(src.address.len() as u8);
-            buffer.extend_from_slice(&src.address);
+            buffer.extend_from_slice(&src.encode());
         }
 
         // Hop count (only if destination is present)
@@ -336,56 +383,20 @@ impl Npdu {
 
         // Destination network address
         let destination = if control.destination_present {
-            if pos + 3 > data.len() {
-                return Err(NetworkError::InvalidNpdu(
-                    "Invalid destination address".to_string(),
-                ));
-            }
+            let (address, offset) = NetworkAddress::parse(&data[pos..])?;
+            pos += offset;
 
-            let network = u16::from_be_bytes([data[pos], data[pos + 1]]);
-            pos += 2;
-
-            let addr_len = data[pos] as usize;
-            pos += 1;
-
-            if pos + addr_len > data.len() {
-                return Err(NetworkError::InvalidNpdu(
-                    "Invalid destination address length".to_string(),
-                ));
-            }
-
-            let address = data[pos..pos + addr_len].to_vec();
-            pos += addr_len;
-
-            Some(NetworkAddress::new(network, address))
+            Some(address)
         } else {
             None
         };
 
         // Source network address
         let source = if control.source_present {
-            if pos + 3 > data.len() {
-                return Err(NetworkError::InvalidNpdu(
-                    "Invalid source address".to_string(),
-                ));
-            }
+            let (address, offset) = NetworkAddress::parse(&data[pos..])?;
+            pos += offset;
 
-            let network = u16::from_be_bytes([data[pos], data[pos + 1]]);
-            pos += 2;
-
-            let addr_len = data[pos] as usize;
-            pos += 1;
-
-            if pos + addr_len > data.len() {
-                return Err(NetworkError::InvalidNpdu(
-                    "Invalid source address length".to_string(),
-                ));
-            }
-
-            let address = data[pos..pos + addr_len].to_vec();
-            pos += addr_len;
-
-            Some(NetworkAddress::new(network, address))
+            Some(address)
         } else {
             None
         };
@@ -573,7 +584,7 @@ impl RouterManager {
             // Find route
             if let Some(router) = self.routing_table.find_route(dest.network) {
                 self.performance_metrics.messages_routed += 1;
-                Ok(Some(router.address.clone()))
+                Ok(Some(router.address))
             } else {
                 self.performance_metrics.network_unreachable_count += 1;
                 Err(NetworkError::NetworkUnreachable(dest.network))
@@ -1539,7 +1550,10 @@ mod tests {
     fn test_npdu_with_destination() {
         let mut npdu = Npdu::new();
         npdu.control.destination_present = true;
-        npdu.destination = Some(NetworkAddress::new(100, vec![192, 168, 1, 1]));
+        npdu.destination = Some(NetworkAddress::new(
+            100,
+            Some([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01]),
+        ));
         npdu.hop_count = Some(5);
 
         let encoded = npdu.encode();
@@ -1548,7 +1562,7 @@ mod tests {
         assert_eq!(decoded.destination.as_ref().unwrap().network, 100);
         assert_eq!(
             decoded.destination.as_ref().unwrap().address,
-            vec![192, 168, 1, 1]
+            Some([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01])
         );
         assert_eq!(decoded.hop_count, Some(5));
     }
@@ -1576,7 +1590,7 @@ mod tests {
 
         let router = RouterInfo {
             networks: vec![100, 200],
-            address: NetworkAddress::new(0, vec![192, 168, 1, 1]),
+            address: NetworkAddress::new(0, Some([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01])),
             performance_index: Some(10),
         };
 
@@ -1594,13 +1608,16 @@ mod tests {
         // Add a router for network 100
         manager.add_discovered_router(
             vec![100],
-            NetworkAddress::new(0, vec![192, 168, 1, 1]),
+            NetworkAddress::new(0, Some([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01])),
             Some(10),
         );
 
         // Test routing a message to network 100
         let mut npdu = Npdu::new();
-        npdu.destination = Some(NetworkAddress::new(100, vec![10, 0, 0, 1]));
+        npdu.destination = Some(NetworkAddress::new(
+            100,
+            Some([0xc0, 0xff, 0xee, 0x00, 0x00, 0x01]),
+        ));
         npdu.hop_count = Some(5);
 
         let result = manager.route_message(&mut npdu).unwrap();
@@ -1609,19 +1626,28 @@ mod tests {
 
         // Test local message routing
         let mut local_npdu = Npdu::new();
-        local_npdu.destination = Some(NetworkAddress::new(1, vec![10, 0, 0, 1]));
+        local_npdu.destination = Some(NetworkAddress::new(
+            1,
+            Some([0xc0, 0xff, 0xee, 0x00, 0x00, 0x01]),
+        ));
         let local_result = manager.route_message(&mut local_npdu).unwrap();
         assert!(local_result.is_none()); // Local delivery
 
         // Test hop count exceeded
         let mut hopless_npdu = Npdu::new();
-        hopless_npdu.destination = Some(NetworkAddress::new(100, vec![10, 0, 0, 1]));
+        hopless_npdu.destination = Some(NetworkAddress::new(
+            100,
+            Some([0xc0, 0xff, 0xee, 0x00, 0x00, 0x01]),
+        ));
         hopless_npdu.hop_count = Some(0);
         assert!(manager.route_message(&mut hopless_npdu).is_err());
 
         // Test network unreachable
         let mut unreachable_npdu = Npdu::new();
-        unreachable_npdu.destination = Some(NetworkAddress::new(999, vec![10, 0, 0, 1]));
+        unreachable_npdu.destination = Some(NetworkAddress::new(
+            999,
+            Some([0xc0, 0xff, 0xee, 0x00, 0x00, 0x01]),
+        ));
         assert!(manager.route_message(&mut unreachable_npdu).is_err());
     }
 
@@ -1632,7 +1658,7 @@ mod tests {
         // Add router for network 100
         manager.add_discovered_router(
             vec![100],
-            NetworkAddress::new(0, vec![192, 168, 1, 1]),
+            NetworkAddress::new(0, Some([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01])),
             Some(10),
         );
 
@@ -1683,14 +1709,14 @@ mod tests {
             source_network: 1,
             destination_network: 2,
             cost: 10,
-            router_address: NetworkAddress::new(0, vec![192, 168, 1, 1]),
+            router_address: NetworkAddress::new(0, Some([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01])),
         });
 
         discovery.add_link(NetworkLink {
             source_network: 2,
             destination_network: 3,
             cost: 15,
-            router_address: NetworkAddress::new(0, vec![192, 168, 2, 1]),
+            router_address: NetworkAddress::new(0, Some([0xc0, 0xff, 0xee, 0x00, 0x00, 0x01])),
         });
 
         // Find path from 1 to 3
@@ -1758,7 +1784,7 @@ mod tests {
     #[test]
     fn test_router_health() {
         let mut diagnostics = NetworkDiagnostics::new();
-        let router_addr = NetworkAddress::new(0, vec![192, 168, 1, 1]);
+        let router_addr = NetworkAddress::new(0, Some([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01]));
 
         let health = RouterHealth {
             responsive: true,
@@ -1779,15 +1805,15 @@ mod tests {
 
     #[test]
     fn test_network_address_properties() {
-        let local_addr = NetworkAddress::new(0, vec![192, 168, 1, 1]);
+        let local_addr = NetworkAddress::new(0, Some([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01]));
         assert!(local_addr.is_local());
         assert!(!local_addr.is_broadcast());
 
-        let broadcast_addr = NetworkAddress::new(0xFFFF, vec![]);
+        let broadcast_addr = NetworkAddress::broadcast();
         assert!(broadcast_addr.is_broadcast());
         assert!(!broadcast_addr.is_local());
 
-        let remote_addr = NetworkAddress::new(100, vec![10, 0, 0, 1]);
+        let remote_addr = NetworkAddress::new(100, Some([0xc0, 0xff, 0xee, 0x00, 0x00, 0x01]));
         assert!(!remote_addr.is_local());
         assert!(!remote_addr.is_broadcast());
     }
@@ -1799,29 +1825,41 @@ mod tests {
         // Add a router
         manager.add_discovered_router(
             vec![100],
-            NetworkAddress::new(0, vec![192, 168, 1, 1]),
+            NetworkAddress::new(0, Some([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01])),
             Some(10),
         );
 
         // Route some messages to generate metrics
         let mut npdu1 = Npdu::new();
-        npdu1.destination = Some(NetworkAddress::new(100, vec![10, 0, 0, 1]));
+        npdu1.destination = Some(NetworkAddress::new(
+            100,
+            Some([0xc0, 0xff, 0xee, 0x00, 0x00, 0x01]),
+        ));
         npdu1.hop_count = Some(5);
         manager.route_message(&mut npdu1).unwrap();
 
         let mut npdu2 = Npdu::new();
-        npdu2.destination = Some(NetworkAddress::new(100, vec![10, 0, 0, 2]));
+        npdu2.destination = Some(NetworkAddress::new(
+            100,
+            Some([0xc0, 0xff, 0xee, 0x00, 0x00, 0x02]),
+        ));
         npdu2.hop_count = Some(1);
         manager.route_message(&mut npdu2).unwrap();
 
         // Try routing to unreachable network
         let mut npdu3 = Npdu::new();
-        npdu3.destination = Some(NetworkAddress::new(999, vec![10, 0, 0, 1]));
+        npdu3.destination = Some(NetworkAddress::new(
+            999,
+            Some([0xc0, 0xff, 0xee, 0x00, 0x00, 0x01]),
+        ));
         let _ = manager.route_message(&mut npdu3);
 
         // Try with hop count 0
         let mut npdu4 = Npdu::new();
-        npdu4.destination = Some(NetworkAddress::new(100, vec![10, 0, 0, 1]));
+        npdu4.destination = Some(NetworkAddress::new(
+            100,
+            Some([0xc0, 0xff, 0xee, 0x00, 0x00, 0x01]),
+        ));
         npdu4.hop_count = Some(0);
         let _ = manager.route_message(&mut npdu4);
 
