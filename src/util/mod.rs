@@ -180,6 +180,8 @@
 //! }
 //! ```
 
+pub mod enum_macros;
+
 // Debug formatting utilities
 #[cfg(not(feature = "std"))]
 use core::fmt;

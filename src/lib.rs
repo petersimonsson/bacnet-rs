@@ -118,6 +118,7 @@ pub mod service;
 pub mod transport;
 
 /// Utility functions for CRC calculations, debugging, and performance monitoring
+#[macro_use]
 pub mod util;
 
 /// BACnet vendor identification and device information
