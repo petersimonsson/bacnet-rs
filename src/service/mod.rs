@@ -716,7 +716,7 @@ impl ReadPropertyResponse {
             return Err(crate::encoding::EncodingError::InvalidTag);
         }
 
-        let property_value = data[value_start..value_end].to_vec();
+        let property_value = data[value_start..=value_end].to_vec();
 
         Ok(ReadPropertyResponse {
             object_identifier,
