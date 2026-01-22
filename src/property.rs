@@ -13,10 +13,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     encoding::{
-        advanced::bitstring::decode_bit_string, decode_application_tag, decode_boolean,
-        decode_character_string, decode_date, decode_double, decode_enumerated,
-        decode_object_identifier, decode_octet_string, decode_real, decode_signed64, decode_time,
-        decode_unsigned64, EncodingError,
+        advanced::bitstring::{decode_bit_string, encode_bit_string},
+        decode_application_tag, decode_boolean, decode_character_string, decode_date,
+        decode_double, decode_enumerated, decode_object_identifier, decode_octet_string,
+        decode_real, decode_signed64, decode_time, decode_unsigned64, encode_application_tag,
+        encode_boolean, encode_character_string, encode_date, encode_double, encode_enumerated,
+        encode_object_identifier, encode_octet_string, encode_real, encode_signed64, encode_time,
+        encode_unsigned64, EncodingError,
     },
     object::{EngineeringUnits, ObjectIdentifier},
     ApplicationTag,
@@ -200,6 +203,30 @@ pub fn decode_property_value(data: &[u8]) -> Result<(PropertyValue, usize), Enco
             Ok((PropertyValue::Unknown(data.to_vec()), consumed + length))
         }
     }
+}
+
+pub fn encode_property_value(
+    value: &PropertyValue,
+    buffer: &mut Vec<u8>,
+) -> Result<(), EncodingError> {
+    match value {
+        PropertyValue::Real(f) => encode_real(buffer, *f)?,
+        PropertyValue::Double(f) => encode_double(buffer, *f)?,
+        PropertyValue::Boolean(b) => encode_boolean(buffer, *b)?,
+        PropertyValue::Unsigned(u) => encode_unsigned64(buffer, *u),
+        PropertyValue::Signed(i) => encode_signed64(buffer, *i),
+        PropertyValue::OctetString(s) => encode_octet_string(buffer, s)?,
+        PropertyValue::CharacterString(s) => encode_character_string(buffer, s)?,
+        PropertyValue::Enumerated(e) => encode_enumerated(buffer, *e),
+        PropertyValue::BitString(bits) => encode_bit_string(buffer, bits)?,
+        PropertyValue::Date(y, m, d, w) => encode_date(buffer, *y, *m, *d, *w)?,
+        PropertyValue::Time(h, m, s, hs) => encode_time(buffer, *h, *m, *s, *hs)?,
+        PropertyValue::ObjectIdentifier(id) => encode_object_identifier(buffer, *id)?,
+        PropertyValue::Null => encode_application_tag(buffer, ApplicationTag::Null, 0),
+        PropertyValue::Unknown(data) => buffer.extend_from_slice(data),
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

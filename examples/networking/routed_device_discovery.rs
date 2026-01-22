@@ -7,6 +7,7 @@ use bacnet_rs::{
     datalink::bip::{BvlcFunction, BvlcHeader},
     network::{NetworkAddress, Npdu},
     object::{ObjectIdentifier, ObjectType, PropertyIdentifier},
+    property::PropertyValue,
     service::{IAmRequest, ReadPropertyResponse, WhoIsRequest},
     vendor::get_vendor_name,
 };
@@ -583,9 +584,14 @@ fn read_property(
                                             if let Ok(response) =
                                                 ReadPropertyResponse::decode(&apdu_data[2..])
                                             {
-                                                return extract_string_value(
-                                                    &response.property_value,
-                                                );
+                                                let value = response.property_values.first();
+                                                if let Some(PropertyValue::CharacterString(value)) =
+                                                    value
+                                                {
+                                                    return Ok(value.clone());
+                                                } else {
+                                                    return Err("No CharacterString value".into());
+                                                }
                                             } else {
                                                 // Try manual parsing if decode fails
                                                 return parse_read_property_ack_manual(
@@ -925,7 +931,13 @@ fn read_object_property(
                             {
                                 if let Ok(response) = ReadPropertyResponse::decode(&apdu_data[2..])
                                 {
-                                    return extract_string_value(&response.property_value);
+                                    if let Some(PropertyValue::CharacterString(value)) =
+                                        response.property_values.first()
+                                    {
+                                        return Ok(value.clone());
+                                    } else {
+                                        return Err("No CharacterString value".into());
+                                    }
                                 } else {
                                     return parse_read_property_ack_manual(&apdu_data[2..]);
                                 }
@@ -1030,7 +1042,13 @@ fn read_property_with_array_index(
                             {
                                 if let Ok(response) = ReadPropertyResponse::decode(&apdu_data[2..])
                                 {
-                                    return extract_string_value(&response.property_value);
+                                    if let Some(PropertyValue::CharacterString(value)) =
+                                        response.property_values.first()
+                                    {
+                                        return Ok(value.clone());
+                                    } else {
+                                        return Err("No CharacterString value".into());
+                                    }
                                 } else {
                                     return parse_read_property_ack_manual(&apdu_data[2..]);
                                 }

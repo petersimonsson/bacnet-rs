@@ -381,7 +381,7 @@ use crate::encoding::{
 use crate::object::{
     ObjectError, ObjectIdentifier, PropertyIdentifier, PropertyValue, Segmentation,
 };
-use crate::property::{self, decode_property_value};
+use crate::property::{self, decode_property_value, encode_property_value};
 use crate::{generate_custom_enum, EncodingError};
 
 /// Special array index value indicating all elements
@@ -656,7 +656,7 @@ pub struct ReadPropertyResponse {
     /// Property array index (optional)
     pub property_array_index: Option<u32>,
     /// Property value
-    pub property_value: Vec<u8>, // Raw encoded property value
+    pub property_values: Vec<property::PropertyValue>, // Raw encoded property value
 }
 
 impl ReadPropertyResponse {
@@ -664,13 +664,13 @@ impl ReadPropertyResponse {
     pub fn new(
         object_identifier: ObjectIdentifier,
         property_identifier: PropertyIdentifier,
-        property_value: Vec<u8>,
+        property_values: Vec<property::PropertyValue>,
     ) -> Self {
         Self {
             object_identifier,
             property_identifier,
             property_array_index: None,
-            property_value,
+            property_values,
         }
     }
 
@@ -699,33 +699,39 @@ impl ReadPropertyResponse {
             Err(_) => None,
         };
 
-        // Property value - context tag 3 (opening tag)
-        if pos >= data.len() || data[pos] != 0x3E {
-            return Err(crate::encoding::EncodingError::InvalidTag);
-        }
-        pos += 1;
+        let (tag, _, consumed) = decode_tag(&data[pos..])?;
+        pos += consumed;
 
-        // Find closing tag
-        let value_start = pos;
-        let mut value_end = pos;
-        while value_end < data.len() {
-            if data[value_end] == 0x3F {
-                break;
+        let property_values = if let BACnetTag::Context(3) = tag {
+            let (tag, _, _) = decode_tag(&data[pos..])?;
+            let mut current_tag = tag;
+            let mut values = Vec::new();
+
+            while let BACnetTag::Application(_) = current_tag {
+                let (value, consumed) = decode_property_value(&data[pos..])?;
+                values.push(value);
+                pos += consumed;
+                let (tag, _, _) = decode_tag(&data[pos..])?;
+                current_tag = tag;
             }
-            value_end += 1;
-        }
+            values
+        } else {
+            return Err(EncodingError::InvalidTag);
+        };
 
-        if value_end >= data.len() {
-            return Err(crate::encoding::EncodingError::InvalidTag);
-        }
+        let (tag, _, _) = decode_tag(&data[pos..])?;
 
-        let property_value = data[value_start..value_end].to_vec();
+        if let BACnetTag::Context(tag) = tag {
+            if tag != 3 {
+                return Err(EncodingError::InvalidTag);
+            }
+        }
 
         Ok(ReadPropertyResponse {
             object_identifier,
             property_identifier: property_identifier.into(),
             property_array_index,
-            property_value,
+            property_values,
         })
     }
 
@@ -744,7 +750,9 @@ impl ReadPropertyResponse {
 
         // Property value - context tag 3 (opening tag)
         buffer.push(0x3E); // Context tag 3, opening tag
-        buffer.extend_from_slice(&self.property_value);
+        for property_value in &self.property_values {
+            encode_property_value(property_value, buffer)?;
+        }
         buffer.push(0x3F); // Context tag 3, closing tag
 
         Ok(())
@@ -2575,5 +2583,32 @@ mod tests {
             result.results[9].value,
             PropertyResultValue::Value(vec![property::PropertyValue::Enumerated(0)])
         );
+    }
+
+    #[test]
+    fn test_read_property_response() {
+        let data = [
+            0xc, 0x2, 0x0, 0xa, 0x50, 0x19, 0x4d, 0x3e, 0x75, 0xf, 0x0, 0x43, 0x6f, 0x72, 0x72,
+            0x69, 0x67, 0x6f, 0x48, 0x65, 0x61, 0x74, 0x69, 0x6e, 0x67, 0x3f,
+        ];
+
+        let response = ReadPropertyResponse::decode(&data).unwrap();
+
+        assert_eq!(
+            response.object_identifier,
+            ObjectIdentifier::new(ObjectType::Device, 2640)
+        );
+        assert_eq!(response.property_identifier, PropertyIdentifier::ObjectName);
+        assert_eq!(response.property_array_index, None);
+        assert_eq!(response.property_values.len(), 1);
+        assert_eq!(
+            response.property_values[0],
+            property::PropertyValue::CharacterString("CorrigoHeating".to_string())
+        );
+
+        let mut encoded = Vec::new();
+        response.encode(&mut encoded).unwrap();
+        assert_eq!(encoded.len(), data.len());
+        assert_eq!(encoded, data);
     }
 }

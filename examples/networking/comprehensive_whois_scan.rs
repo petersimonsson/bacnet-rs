@@ -999,7 +999,7 @@ fn send_request_and_get_response(
                                         if let Ok(response) =
                                             ReadPropertyResponse::decode(&apdu_data[2..])
                                         {
-                                            return decode_bacnet_value(&response.property_value);
+                                            return Ok(format!("{:?}", response.property_values));
                                         }
                                     }
                                     // Try to parse as raw property data
