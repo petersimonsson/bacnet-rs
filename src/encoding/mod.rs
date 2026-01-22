@@ -642,7 +642,7 @@ pub fn encode_object_identifier(buffer: &mut Vec<u8>, object_id: ObjectIdentifie
 }
 
 /// Decode a BACnet object identifier
-pub fn decode_object_identifier(data: &[u8]) -> Result<((u16, u32), usize)> {
+pub fn decode_object_identifier(data: &[u8]) -> Result<(ObjectIdentifier, usize)> {
     let (tag, length, mut consumed) = decode_application_tag(data)?;
 
     if tag != ApplicationTag::ObjectIdentifier {
@@ -662,9 +662,10 @@ pub fn decode_object_identifier(data: &[u8]) -> Result<((u16, u32), usize)> {
 
     let object_type = (object_id >> 22) as u16;
     let instance = object_id & 0x3FFFFF;
+    let object_id = ObjectIdentifier::new(object_type.into(), instance);
 
     consumed += 4;
-    Ok(((object_type, instance), consumed))
+    Ok((object_id, consumed))
 }
 
 /// Encode a BACnet double (64-bit float)
@@ -1551,10 +1552,10 @@ impl<'a> DecodingStream<'a> {
     }
 
     /// Decode an object identifier
-    pub fn decode_object_identifier(&mut self) -> Result<(u16, u32)> {
-        let (value, consumed) = decode_object_identifier(&self.data[self.position..])?;
+    pub fn decode_object_identifier(&mut self) -> Result<ObjectIdentifier> {
+        let (identifier, consumed) = decode_object_identifier(&self.data[self.position..])?;
         self.position += consumed;
-        Ok(value)
+        Ok(identifier)
     }
 
     /// Skip a value
@@ -2264,9 +2265,9 @@ mod tests {
 
         let object_id = ObjectIdentifier::new(ObjectType::AnalogValue, 12345);
         encode_object_identifier(&mut buffer, object_id).unwrap(); // Analog Value 12345
-        let ((object_type, instance), _) = decode_object_identifier(&buffer).unwrap();
-        assert_eq!(object_type, 2);
-        assert_eq!(instance, 12345);
+        let (object_id, _) = decode_object_identifier(&buffer).unwrap();
+        assert_eq!(object_id.object_type, ObjectType::AnalogValue);
+        assert_eq!(object_id.instance, 12345);
     }
 
     #[test]

@@ -540,11 +540,7 @@ impl IAmRequest {
         let mut pos = 0;
 
         // Decode device identifier - application tag
-        let ((object_type, instance), consumed) = decode_object_identifier(&data[pos..])?;
-        let device_identifier = ObjectIdentifier {
-            object_type: object_type.into(),
-            instance,
-        };
+        let (device_identifier, consumed) = decode_object_identifier(&data[pos..])?;
         pos += consumed;
 
         // Decode max APDU length accepted - application tag
