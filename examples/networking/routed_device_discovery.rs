@@ -23,7 +23,7 @@ const BACNET_PORT: u16 = 0xBAC0; // 47808
 struct RemoteDevice {
     device_id: u32,
     network_number: u16,
-    mac_address: Vec<u8>,
+    mac_address: Option<Vec<u8>>,
     socket_addr: SocketAddr,
     #[allow(dead_code)]
     vendor_id: Option<u16>,
@@ -279,7 +279,7 @@ fn discover_devices_on_network(
     npdu.control.destination_present = true;
     npdu.destination = Some(NetworkAddress {
         network,
-        address: vec![], // Empty for broadcast
+        address: None, // Empty for broadcast
     });
     npdu.hop_count = Some(255);
 
@@ -335,7 +335,7 @@ fn collect_i_am_responses(
                                                 (src_net.network, src_net.address)
                                             } else {
                                                 // Local network
-                                                (0, vec![])
+                                                (0, None)
                                             };
 
                                         let vendor_name =

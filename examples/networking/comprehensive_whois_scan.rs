@@ -24,7 +24,7 @@ const BACNET_PORT: u16 = 0xBAC0; // 47808
 struct BACnetDevice {
     device_id: u32,
     network_number: u16,
-    mac_address: Vec<u8>,
+    mac_address: Option<Vec<u8>>,
     socket_addr: SocketAddr,
     #[allow(dead_code)]
     vendor_id: u16,
@@ -226,7 +226,7 @@ fn discover_devices_on_network(
     npdu.control.destination_present = true;
     npdu.destination = Some(NetworkAddress {
         network,
-        address: vec![], // Broadcast
+        address: None, // Broadcast
     });
     npdu.hop_count = Some(255);
 
@@ -269,7 +269,7 @@ fn collect_i_am_responses(
                                         if let Some(src_net) = npdu.source {
                                             (src_net.network, src_net.address)
                                         } else {
-                                            (0, vec![])
+                                            (0, None)
                                         };
 
                                     let vendor_name =
