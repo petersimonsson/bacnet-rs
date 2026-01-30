@@ -112,6 +112,24 @@ pub enum ApduType {
     Abort = 7,
 }
 
+impl TryFrom<u8> for ApduType {
+    type Error = ApplicationError;
+
+    fn try_from(value: u8) -> Result<Self> {
+        match value {
+            0 => Ok(ApduType::ConfirmedRequest),
+            1 => Ok(ApduType::UnconfirmedRequest),
+            2 => Ok(ApduType::SimpleAck),
+            3 => Ok(ApduType::ComplexAck),
+            4 => Ok(ApduType::SegmentAck),
+            5 => Ok(ApduType::Error),
+            6 => Ok(ApduType::Reject),
+            7 => Ok(ApduType::Abort),
+            _ => Err(ApplicationError::UnsupportedApduType),
+        }
+    }
+}
+
 /// Application Protocol Data Unit
 #[derive(Debug, Clone)]
 pub enum Apdu {
@@ -448,17 +466,7 @@ impl Apdu {
 
         let pdu_type_byte = data[0];
         let pdu_type_raw = (pdu_type_byte >> 4) & 0x0F;
-        let pdu_type = match pdu_type_raw {
-            0 => ApduType::ConfirmedRequest,
-            1 => ApduType::UnconfirmedRequest,
-            2 => ApduType::SimpleAck,
-            3 => ApduType::ComplexAck,
-            4 => ApduType::SegmentAck,
-            5 => ApduType::Error,
-            6 => ApduType::Reject,
-            7 => ApduType::Abort,
-            _ => return Err(ApplicationError::UnsupportedApduType),
-        };
+        let pdu_type = pdu_type_raw.try_into()?;
 
         match pdu_type {
             ApduType::ConfirmedRequest => {
