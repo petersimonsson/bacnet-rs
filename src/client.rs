@@ -16,6 +16,7 @@ use crate::{
     app::{Apdu, MaxApduSize, MaxSegments},
     network::Npdu,
     object::{EngineeringUnits, ObjectIdentifier, ObjectType, Segmentation},
+    property::PropertyValue,
     service::{
         ConfirmedServiceChoice, IAmRequest, PropertyReference, ReadAccessSpecification,
         ReadPropertyMultipleRequest, UnconfirmedServiceChoice, WhoIsRequest,
@@ -49,18 +50,6 @@ pub struct ObjectInfo {
     pub present_value: Option<PropertyValue>,
     pub units: Option<EngineeringUnits>,
     pub status_flags: Option<Vec<bool>>,
-}
-
-/// Decoded property values
-#[derive(Debug, Clone)]
-pub enum PropertyValue {
-    Real(f32),
-    Boolean(bool),
-    Unsigned(u32),
-    Signed(i32),
-    CharacterString(String),
-    Enumerated(u32),
-    Null,
 }
 
 #[cfg(feature = "std")]
