@@ -3,6 +3,9 @@
 //! This module provides utilities for decoding BACnet property values
 //! from their encoded representations into typed Rust values.
 
+#[cfg(feature = "std")]
+use std::fmt::Display;
+
 #[cfg(not(feature = "std"))]
 use alloc::{string::String, vec::Vec};
 #[cfg(feature = "serde")]
@@ -104,6 +107,10 @@ impl PropertyValue {
     }
 }
 
+#[cfg(feature = "std")]
+impl Display for PropertyValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_display_string())
     }
 }
 
