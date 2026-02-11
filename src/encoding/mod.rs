@@ -312,6 +312,26 @@ pub fn encode_unsigned(buffer: &mut Vec<u8>, value: u32) -> Result<()> {
     Ok(())
 }
 
+pub fn encode_unsigned64(buffer: &mut Vec<u8>, value: u64) {
+    let bytes = if value == 0 {
+        vec![0]
+    } else if value <= 0xFF {
+        vec![value as u8]
+    } else if value <= 0xFFFF {
+        (value as u16).to_be_bytes().to_vec()
+    } else if value <= 0xFFFFFF {
+        let bytes = value.to_be_bytes();
+        bytes[1..].to_vec()
+    } else if value <= 0xFFFFFFFF {
+        (value as u32).to_be_bytes().to_vec()
+    } else {
+        value.to_be_bytes().to_vec()
+    };
+
+    encode_application_tag(buffer, ApplicationTag::UnsignedInt, bytes.len());
+    buffer.extend_from_slice(&bytes);
+}
+
 /// Decode a BACnet unsigned integer
 pub fn decode_unsigned(data: &[u8]) -> Result<(u32, usize)> {
     let (tag, length, mut consumed) = decode_application_tag(data)?;
@@ -344,6 +364,28 @@ pub fn decode_unsigned(data: &[u8]) -> Result<(u32, usize)> {
     Ok((value, consumed))
 }
 
+/// Decode a BACnet unsigned integer into a u64
+pub fn decode_unsigned64(data: &[u8]) -> Result<(u64, usize)> {
+    let (tag, length, mut consumed) = decode_application_tag(data)?;
+
+    if tag != ApplicationTag::UnsignedInt {
+        return Err(EncodingError::InvalidTag);
+    }
+
+    if data.len() < consumed + length {
+        return Err(EncodingError::BufferUnderflow);
+    }
+
+    let unused = 8 - length;
+    let mut value = [0; 8];
+    value[unused..].copy_from_slice(&data[consumed..consumed + length]);
+
+    let value = u64::from_be_bytes(value);
+
+    consumed += length;
+    Ok((value, consumed))
+}
+
 /// Encode a BACnet signed integer
 pub fn encode_signed(buffer: &mut Vec<u8>, value: i32) -> Result<()> {
     let bytes = if (-128..=127).contains(&value) {
@@ -360,6 +402,24 @@ pub fn encode_signed(buffer: &mut Vec<u8>, value: i32) -> Result<()> {
     encode_application_tag(buffer, ApplicationTag::SignedInt, bytes.len());
     buffer.extend_from_slice(&bytes);
     Ok(())
+}
+
+pub fn encode_signed64(buffer: &mut Vec<u8>, value: i64) {
+    let bytes = if (-128..=127).contains(&value) {
+        vec![value as u8]
+    } else if (-32768..=32767).contains(&value) {
+        (value as i16).to_be_bytes().to_vec()
+    } else if (-8388608..=8388607).contains(&value) {
+        let bytes = value.to_be_bytes();
+        bytes[1..].to_vec()
+    } else if (i32::MIN as i64..=i32::MAX as i64).contains(&value) {
+        (value as i32).to_be_bytes().to_vec()
+    } else {
+        value.to_be_bytes().to_vec()
+    };
+
+    encode_application_tag(buffer, ApplicationTag::SignedInt, bytes.len());
+    buffer.extend_from_slice(&bytes);
 }
 
 /// Decode a BACnet signed integer
@@ -397,6 +457,48 @@ pub fn decode_signed(data: &[u8]) -> Result<(i32, usize)> {
             data[consumed + 2],
             data[consumed + 3],
         ]),
+        _ => return Err(EncodingError::InvalidLength),
+    };
+
+    consumed += length;
+    Ok((value, consumed))
+}
+
+/// Decode a BACnet signed integer into a i64
+pub fn decode_signed64(data: &[u8]) -> Result<(i64, usize)> {
+    let (tag, length, mut consumed) = decode_application_tag(data)?;
+
+    if tag != ApplicationTag::SignedInt {
+        return Err(EncodingError::InvalidTag);
+    }
+
+    if data.len() < consumed + length {
+        return Err(EncodingError::BufferUnderflow);
+    }
+
+    let unused = 8 - length;
+    let mut value = [0; 8];
+    value[unused..].copy_from_slice(&data[consumed..consumed + length]);
+
+    let value = match length {
+        1 => data[consumed] as i8 as i64,
+        2 => i16::from_be_bytes([data[consumed], data[consumed + 1]]) as i64,
+        v if (3..8).contains(&v) => {
+            let sign_extend = if data[consumed] & 0x80 != 0 {
+                0xFF
+            } else {
+                0x00
+            };
+
+            let mut value = [sign_extend; 8];
+            value[unused..].copy_from_slice(&data[consumed..consumed + length]);
+            i64::from_be_bytes(value)
+        }
+        8 => {
+            let mut value = [0; 8];
+            value.copy_from_slice(&data[consumed..consumed + length]);
+            i64::from_be_bytes(value)
+        }
         _ => return Err(EncodingError::InvalidLength),
     };
 
@@ -2389,6 +2491,57 @@ mod tests {
             encode_unsigned(&mut buffer, i).unwrap();
             let (value, _) = decode_unsigned(&buffer).unwrap();
             assert_eq!(value, i);
+        }
+    }
+
+    #[test]
+    fn test_encode_decode_i64() {
+        let mut buffer = Vec::new();
+        let test_values = [
+            0,
+            1,
+            -1,
+            -330,
+            i32::MAX as i64,
+            i32::MIN as i64,
+            i32::MAX as i64 + 10,
+            i32::MIN as i64 - 10,
+            i64::MAX,
+            i64::MIN,
+            i64::MAX as i32 as i64,
+            i64::MIN as i32 as i64,
+        ];
+
+        for &test_value in &test_values {
+            buffer.clear();
+            encode_signed64(&mut buffer, test_value);
+            let (value, _) = decode_signed64(&buffer).unwrap();
+            assert_eq!(value, test_value);
+        }
+    }
+
+    #[test]
+    fn test_encode_decode_u64() {
+        let mut buffer = Vec::new();
+        let test_values = [
+            0,
+            1,
+            255,
+            330,
+            u32::MAX as u64,
+            u32::MIN as u64,
+            u32::MAX as u64 + 10,
+            u64::MAX,
+            u64::MIN,
+            u64::MAX as u32 as u64,
+            u64::MIN as u32 as u64,
+        ];
+
+        for &test_value in &test_values {
+            buffer.clear();
+            encode_unsigned64(&mut buffer, test_value);
+            let (value, _) = decode_unsigned64(&buffer).unwrap();
+            assert_eq!(value, test_value);
         }
     }
 }
