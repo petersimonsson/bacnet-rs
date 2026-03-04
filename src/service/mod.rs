@@ -117,9 +117,9 @@
 //! // Create a read property multiple request
 //! let object_id = ObjectIdentifier::new(ObjectType::Device, 12345);
 //! let property_refs = vec![
-//!     PropertyReference::new(PropertyIdentifier::ObjectName.into()),
-//!     PropertyReference::new(70), // ModelName
-//!     PropertyReference::new(PropertyIdentifier::VendorName.into()),
+//!     PropertyReference::new(PropertyIdentifier::ObjectName),
+//!     PropertyReference::new(PropertyIdentifier::ModelName),
+//!     PropertyReference::new(PropertyIdentifier::VendorName),
 //! ];
 //! let spec = ReadAccessSpecification::new(object_id, property_refs);
 //!
@@ -939,7 +939,7 @@ pub struct ReadAccessSpecification {
 #[derive(Debug, Clone)]
 pub struct PropertyReference {
     /// Property identifier
-    pub property_identifier: u32,
+    pub property_identifier: PropertyIdentifier,
     /// Property array index (optional)
     pub property_array_index: Option<u32>,
 }
@@ -978,7 +978,7 @@ impl ReadAccessSpecification {
 
 impl PropertyReference {
     /// Create a new property reference
-    pub fn new(property_identifier: u32) -> Self {
+    pub fn new(property_identifier: PropertyIdentifier) -> Self {
         Self {
             property_identifier,
             property_array_index: None,
@@ -986,7 +986,7 @@ impl PropertyReference {
     }
 
     /// Create a new property reference with array index
-    pub fn with_array_index(property_identifier: u32, array_index: u32) -> Self {
+    pub fn with_array_index(property_identifier: PropertyIdentifier, array_index: u32) -> Self {
         Self {
             property_identifier,
             property_array_index: Some(array_index),
@@ -1928,9 +1928,9 @@ mod tests {
         let object_id1 = ObjectIdentifier::new(ObjectType::AnalogInput, 1);
         let object_id2 = ObjectIdentifier::new(ObjectType::BinaryInput, 2);
 
-        let prop_ref1 = PropertyReference::new(85); // Present Value
-        let prop_ref2 = PropertyReference::new(77); // Object Name
-        let prop_ref3 = PropertyReference::with_array_index(87, 8); // Priority Array[8]
+        let prop_ref1 = PropertyReference::new(PropertyIdentifier::PresentValue); // Present Value
+        let prop_ref2 = PropertyReference::new(PropertyIdentifier::ObjectName); // Object Name
+        let prop_ref3 = PropertyReference::with_array_index(PropertyIdentifier::PriorityArray, 8); // Priority Array[8]
 
         let spec1 = ReadAccessSpecification::new(object_id1, vec![prop_ref1, prop_ref2]);
         let spec2 = ReadAccessSpecification::new(object_id2, vec![prop_ref3]);

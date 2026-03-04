@@ -6,7 +6,7 @@
 use bacnet_rs::{
     app::{Apdu, MaxApduSize, MaxSegments},
     network::Npdu,
-    object::{ObjectIdentifier, ObjectType},
+    object::{ObjectIdentifier, ObjectType, PropertyIdentifier},
     property::decode_units,
     service::{
         ConfirmedServiceChoice, IAmRequest, PropertyReference, ReadAccessSpecification,
@@ -52,10 +52,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let property_refs = vec![
-        PropertyReference::new(77),  // Object_Name
-        PropertyReference::new(28),  // Description
-        PropertyReference::new(85),  // Present_Value
-        PropertyReference::new(117), // Units
+        PropertyReference::new(PropertyIdentifier::ObjectName), // Object_Name
+        PropertyReference::new(PropertyIdentifier::Description), // Description
+        PropertyReference::new(PropertyIdentifier::PresentValue), // Present_Value
+        PropertyReference::new(PropertyIdentifier::Units),      // Units
     ];
 
     let read_spec = ReadAccessSpecification::new(test_object, property_refs);

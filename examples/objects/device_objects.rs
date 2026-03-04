@@ -6,7 +6,7 @@
 use bacnet_rs::{
     app::{Apdu, MaxApduSize, MaxSegments},
     network::Npdu,
-    object::{EngineeringUnits, ObjectIdentifier, ObjectType},
+    object::{EngineeringUnits, ObjectIdentifier, ObjectType, PropertyIdentifier},
     property::decode_units,
     service::{
         ConfirmedServiceChoice, IAmRequest, PropertyReference, ReadAccessSpecification,
@@ -715,7 +715,7 @@ fn read_device_object_list(
     // Create ReadPropertyMultiple request for device object list
     let device_object = ObjectIdentifier::new(ObjectType::Device, device_id);
 
-    let property_ref = PropertyReference::new(76); // Object_List property
+    let property_ref = PropertyReference::new(PropertyIdentifier::ObjectList); // Object_List property
     let read_spec = ReadAccessSpecification::new(device_object, vec![property_ref]);
     let rpm_request = ReadPropertyMultipleRequest::new(vec![read_spec]);
 
@@ -769,9 +769,8 @@ fn read_objects_properties(
             let mut property_refs = Vec::new();
 
             // Always try to read these basic properties
-            property_refs.push(PropertyReference::new(77)); // Object_Name
-            property_refs.push(PropertyReference::new(28)); // Description
-
+            property_refs.push(PropertyReference::new(PropertyIdentifier::ObjectName));
+            property_refs.push(PropertyReference::new(PropertyIdentifier::Description));
             // Add Present_Value for input/output/value objects
             match obj.object_type {
                 ObjectType::AnalogInput
@@ -783,7 +782,7 @@ fn read_objects_properties(
                 | ObjectType::MultiStateInput
                 | ObjectType::MultiStateOutput
                 | ObjectType::MultiStateValue => {
-                    property_refs.push(PropertyReference::new(85)); // Present_Value
+                    property_refs.push(PropertyReference::new(PropertyIdentifier::PresentValue));
                 }
                 _ => {}
             }
@@ -791,7 +790,7 @@ fn read_objects_properties(
             // Add Units for analog objects
             match obj.object_type {
                 ObjectType::AnalogInput | ObjectType::AnalogOutput | ObjectType::AnalogValue => {
-                    property_refs.push(PropertyReference::new(117)); // Units
+                    property_refs.push(PropertyReference::new(PropertyIdentifier::Units));
                 }
                 _ => {}
             }

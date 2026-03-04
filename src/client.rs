@@ -15,7 +15,7 @@ use alloc::{collections::BTreeMap as HashMap, string::String, vec::Vec};
 use crate::{
     app::{Apdu, MaxApduSize, MaxSegments},
     network::Npdu,
-    object::{EngineeringUnits, ObjectIdentifier, ObjectType, Segmentation},
+    object::{EngineeringUnits, ObjectIdentifier, ObjectType, PropertyIdentifier, Segmentation},
     property::PropertyValue,
     service::{
         ConfirmedServiceChoice, IAmRequest, PropertyReference, ReadAccessSpecification,
@@ -110,7 +110,7 @@ impl BacnetClient {
         device_id: u32,
     ) -> Result<Vec<ObjectIdentifier>, Box<dyn std::error::Error>> {
         let device_object = ObjectIdentifier::new(ObjectType::Device, device_id);
-        let property_ref = PropertyReference::new(76); // Object_List property
+        let property_ref = PropertyReference::new(PropertyIdentifier::ObjectList); // Object_List property
         let read_spec = ReadAccessSpecification::new(device_object, vec![property_ref]);
         let rpm_request = ReadPropertyMultipleRequest::new(vec![read_spec]);
 
@@ -141,8 +141,8 @@ impl BacnetClient {
                 let mut property_refs = Vec::new();
 
                 // Always read basic properties
-                property_refs.push(PropertyReference::new(77)); // Object_Name
-                property_refs.push(PropertyReference::new(28)); // Description
+                property_refs.push(PropertyReference::new(PropertyIdentifier::ObjectName)); // Object_Name
+                property_refs.push(PropertyReference::new(PropertyIdentifier::Description)); // Description
 
                 // Add Present_Value for input/output/value objects
                 match obj.object_type {
@@ -155,8 +155,10 @@ impl BacnetClient {
                     | ObjectType::MultiStateInput
                     | ObjectType::MultiStateOutput
                     | ObjectType::MultiStateValue => {
-                        property_refs.push(PropertyReference::new(85)); // Present_Value
-                        property_refs.push(PropertyReference::new(111)); // Status_Flags
+                        property_refs
+                            .push(PropertyReference::new(PropertyIdentifier::PresentValue)); // Present_Value
+                        property_refs.push(PropertyReference::new(PropertyIdentifier::StatusFlags));
+                        // Status_Flags
                     }
                     _ => {}
                 }
@@ -166,7 +168,7 @@ impl BacnetClient {
                     ObjectType::AnalogInput
                     | ObjectType::AnalogOutput
                     | ObjectType::AnalogValue => {
-                        property_refs.push(PropertyReference::new(117)); // Units
+                        property_refs.push(PropertyReference::new(PropertyIdentifier::Units));
                     }
                     _ => {}
                 }
