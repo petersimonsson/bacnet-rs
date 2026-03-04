@@ -988,29 +988,7 @@ fn encode_rpm_request(
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let mut buffer = Vec::new();
 
-    for spec in &request.read_access_specifications {
-        // Object identifier - context tag 0
-        let object_id: u32 = spec.object_identifier.try_into()?;
-        buffer.push(0x0C); // Context tag 0, length 4
-        buffer.extend_from_slice(&object_id.to_be_bytes());
-
-        // Property references - context tag 1 (opening tag)
-        buffer.push(0x1E); // Context tag 1, opening tag
-
-        for prop_ref in &spec.property_references {
-            // Property identifier
-            buffer.push(0x09); // Context tag 0 (within property reference), length 1
-            buffer.push(prop_ref.property_identifier as u8);
-
-            // Array index (optional)
-            if let Some(array_index) = prop_ref.property_array_index {
-                buffer.push(0x19); // Context tag 1 (within property reference), length 1
-                buffer.push(array_index as u8);
-            }
-        }
-
-        buffer.push(0x1F); // Context tag 1, closing tag
-    }
+    request.encode(&mut buffer)?;
 
     Ok(buffer)
 }

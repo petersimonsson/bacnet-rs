@@ -956,6 +956,14 @@ impl ReadPropertyMultipleRequest {
     pub fn add_specification(&mut self, spec: ReadAccessSpecification) {
         self.read_access_specifications.push(spec);
     }
+
+    pub fn encode(&self, buffer: &mut Vec<u8>) -> EncodingResult<()> {
+        for spec in &self.read_access_specifications {
+            spec.encode(buffer)?;
+        }
+
+        Ok(())
+    }
 }
 
 impl ReadAccessSpecification {
@@ -974,6 +982,23 @@ impl ReadAccessSpecification {
     pub fn add_property(&mut self, property_reference: PropertyReference) {
         self.property_references.push(property_reference);
     }
+
+    pub fn encode(&self, buffer: &mut Vec<u8>) -> EncodingResult<()> {
+        // Object identifier - context tag 0
+        let object_id_bytes = encode_context_object_id(self.object_identifier, 0)?;
+        buffer.extend_from_slice(&object_id_bytes);
+
+        // Property references - context tag 1 (opening tag)
+        buffer.push(0x1E); // Context tag 1, opening tag
+
+        for property_ref in &self.property_references {
+            property_ref.encode(buffer)?;
+        }
+
+        buffer.push(0x1F); // Context tag 1, closing tag
+
+        Ok(())
+    }
 }
 
 impl PropertyReference {
@@ -991,6 +1016,18 @@ impl PropertyReference {
             property_identifier,
             property_array_index: Some(array_index),
         }
+    }
+
+    pub fn encode(&self, buffer: &mut Vec<u8>) -> EncodingResult<()> {
+        let prop_id_bytes = encode_context_enumerated(self.property_identifier.into(), 0)?;
+        buffer.extend_from_slice(&prop_id_bytes);
+
+        if let Some(array_index) = self.property_array_index {
+            let array_bytes = encode_context_unsigned(array_index, 1)?;
+            buffer.extend_from_slice(&array_bytes);
+        }
+
+        Ok(())
     }
 }
 

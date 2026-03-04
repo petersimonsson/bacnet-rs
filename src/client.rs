@@ -401,25 +401,7 @@ impl BacnetClient {
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         let mut buffer = Vec::new();
 
-        for spec in &request.read_access_specifications {
-            // Object identifier - context tag 0
-            let object_id: u32 = spec.object_identifier.try_into()?;
-            buffer.push(0x0C);
-            buffer.extend_from_slice(&object_id.to_be_bytes());
-
-            // Property references - context tag 1
-            buffer.push(0x1E);
-            for prop_ref in &spec.property_references {
-                buffer.push(0x09);
-                buffer.push(prop_ref.property_identifier as u8);
-
-                if let Some(array_index) = prop_ref.property_array_index {
-                    buffer.push(0x19);
-                    buffer.push(array_index as u8);
-                }
-            }
-            buffer.push(0x1F);
-        }
+        request.encode(&mut buffer)?;
 
         Ok(buffer)
     }
