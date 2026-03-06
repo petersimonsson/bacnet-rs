@@ -372,14 +372,16 @@ pub enum AbortReason {
 }
 
 use crate::encoding::{
-    decode_context_enumerated, decode_context_object_id, decode_context_unsigned,
-    decode_enumerated, decode_object_identifier, decode_unsigned, encode_context_enumerated,
-    encode_context_object_id, encode_context_unsigned, encode_enumerated, encode_object_identifier,
-    encode_unsigned, Result as EncodingResult,
+    decode_context_enumerated, decode_context_object_id, decode_context_tag,
+    decode_context_unsigned, decode_enumerated, decode_object_identifier, decode_tag,
+    decode_unsigned, encode_context_enumerated, encode_context_object_id, encode_context_unsigned,
+    encode_enumerated, encode_object_identifier, encode_unsigned, BACnetTag,
+    Result as EncodingResult,
 };
 use crate::object::{
     ObjectError, ObjectIdentifier, PropertyIdentifier, PropertyValue, Segmentation,
 };
+use crate::property::{self, decode_property_value};
 use crate::{generate_custom_enum, EncodingError};
 
 /// Special array index value indicating all elements
@@ -1029,6 +1031,153 @@ impl PropertyReference {
 
         Ok(())
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReadPropertyMultipleResponse {
+    pub read_access_results: Vec<ReadAccessResult>,
+}
+
+impl ReadPropertyMultipleResponse {
+    pub fn decode(data: &[u8]) -> EncodingResult<Self> {
+        let mut read_access_results = Vec::new();
+
+        let mut total_consumed = 0;
+
+        while total_consumed < data.len() {
+            let (result, consumed) = ReadAccessResult::decode(&data[total_consumed..])?;
+            total_consumed += consumed;
+            read_access_results.push(result);
+        }
+
+        Ok(Self {
+            read_access_results,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReadAccessResult {
+    pub object_identifier: ObjectIdentifier,
+    pub results: Vec<PropertyResult>,
+}
+
+impl ReadAccessResult {
+    pub fn decode(data: &[u8]) -> EncodingResult<(Self, usize)> {
+        let mut total_consumed = 0;
+        let mut results = Vec::new();
+        let (object_id, consumed) = decode_context_object_id(data, 0)?;
+        total_consumed += consumed;
+
+        let (context_id, context_size, consumed) = decode_context_tag(&data[total_consumed..])?;
+        total_consumed += consumed;
+
+        if context_id == 1 && context_size == 6 {
+            let (mut context_id, _, _) = decode_context_tag(&data[total_consumed..])?;
+
+            while context_id != 1 {
+                let (result, consumed) = PropertyResult::decode(&data[total_consumed..])?;
+                total_consumed += consumed;
+                results.push(result);
+
+                let (id, _, _) = decode_context_tag(&data[total_consumed..])?;
+                context_id = id;
+            }
+
+            let (_, _, consumed) = decode_context_tag(&data[total_consumed..])?;
+            total_consumed += consumed;
+
+            if context_id != 1 {
+                return Err(EncodingError::InvalidTag);
+            }
+        } else {
+            return Err(EncodingError::InvalidTag);
+        }
+
+        Ok((
+            Self {
+                object_identifier: object_id,
+                results,
+            },
+            total_consumed,
+        ))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PropertyResult {
+    pub property_identifier: PropertyIdentifier,
+    pub array_index: Option<u32>,
+    pub value: PropertyResultValue,
+}
+
+impl PropertyResult {
+    pub fn decode(bytes: &[u8]) -> EncodingResult<(Self, usize)> {
+        let (property_identifier, consumed) = decode_context_enumerated(bytes, 2)?;
+        let mut total_consumed = consumed;
+
+        let (tag, _, _) = decode_tag(&bytes[total_consumed..])?;
+
+        let array_index = if let BACnetTag::Context(3) = tag {
+            let (index, consumed) = decode_context_unsigned(&bytes[total_consumed..], 3)?;
+            total_consumed += consumed;
+            Some(index)
+        } else {
+            None
+        };
+
+        let (tag, _, consumed) = decode_tag(&bytes[total_consumed..])?;
+        total_consumed += consumed;
+
+        let value = if let BACnetTag::Context(4) = tag {
+            let (tag, _, _) = decode_tag(&bytes[total_consumed..])?;
+            let mut current_tag = tag;
+            let mut values = Vec::new();
+
+            while let BACnetTag::Application(_) = current_tag {
+                let (value, consumed) = decode_property_value(&bytes[total_consumed..])?;
+                values.push(value);
+                total_consumed += consumed;
+                let (tag, _, _) = decode_tag(&bytes[total_consumed..])?;
+                current_tag = tag;
+            }
+            PropertyResultValue::Value(values)
+        } else if let BACnetTag::Context(5) = tag {
+            let (error_class, consumed) = decode_enumerated(&bytes[total_consumed..])?;
+            total_consumed += consumed;
+            let (error_code, consumed) = decode_enumerated(&bytes[total_consumed..])?;
+            total_consumed += consumed;
+            PropertyResultValue::Error(error_class, error_code)
+        } else {
+            return Err(EncodingError::InvalidTag);
+        };
+
+        let (tag, _, consumed) = decode_tag(&bytes[total_consumed..])?;
+        total_consumed += consumed;
+
+        if let BACnetTag::Context(tag) = tag {
+            if tag != 4 && tag != 5 {
+                return Err(EncodingError::InvalidTag);
+            }
+        } else {
+            return Err(EncodingError::InvalidTag);
+        }
+
+        Ok((
+            Self {
+                property_identifier: property_identifier.into(),
+                array_index,
+                value,
+            },
+            total_consumed,
+        ))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PropertyResultValue {
+    Value(Vec<property::PropertyValue>),
+    Error(u32, u32),
 }
 
 /// Subscribe COV request (confirmed service)
@@ -2309,5 +2458,122 @@ mod tests {
         assert!(now_sync.date_time.time.minute <= 59);
         assert!(now_sync.date_time.time.second <= 59);
         assert!(now_sync.date_time.time.hundredths <= 99);
+    }
+
+    #[test]
+    fn test_read_property_multiple_response() {
+        let data = [
+            0xc, 0x0, 0x80, 0x75, 0x3b, 0x1e, 0x29, 0x4b, 0x4e, 0xc4, 0x0, 0x80, 0x75, 0x3b, 0x4f,
+            0x29, 0x4d, 0x4e, 0x75, 0xc, 0x0, 0x48, 0x53, 0x31, 0x43, 0x75, 0x72, 0x76, 0x65, 0x5f,
+            0x59, 0x33, 0x4f, 0x29, 0x4f, 0x4e, 0x91, 0x2, 0x4f, 0x29, 0x55, 0x4e, 0x44, 0x42,
+            0x6c, 0x0, 0x0, 0x4f, 0x29, 0x6f, 0x4e, 0x82, 0x4, 0x0, 0x4f, 0x29, 0x24, 0x4e, 0x91,
+            0x0, 0x4f, 0x29, 0x51, 0x4e, 0x10, 0x4f, 0x29, 0x75, 0x4e, 0x91, 0x3e, 0x4f, 0x29,
+            0x1c, 0x4e, 0x75, 0x43, 0x0, 0x53, 0x65, 0x74, 0x70, 0x6f, 0x69, 0x6e, 0x74, 0x20,
+            0x66, 0x6f, 0x72, 0x20, 0x74, 0x68, 0x69, 0x72, 0x64, 0x20, 0x63, 0x75, 0x72, 0x76,
+            0x65, 0x70, 0x6f, 0x69, 0x6e, 0x74, 0x20, 0x66, 0x6f, 0x72, 0x20, 0x6f, 0x75, 0x74,
+            0x64, 0x6f, 0x6f, 0x72, 0x20, 0x63, 0x6f, 0x6d, 0x70, 0x65, 0x6e, 0x73, 0x61, 0x74,
+            0x65, 0x64, 0x20, 0x73, 0x65, 0x74, 0x70, 0x6f, 0x69, 0x6e, 0x74, 0x20, 0x48, 0x53,
+            0x31, 0x4f, 0x29, 0x67, 0x4e, 0x91, 0x0, 0x4f, 0x1f,
+        ];
+
+        let response = ReadPropertyMultipleResponse::decode(&data).unwrap();
+        assert_eq!(response.read_access_results.len(), 1);
+
+        let result = &response.read_access_results[0];
+        assert_eq!(
+            result.object_identifier,
+            ObjectIdentifier::new(ObjectType::AnalogValue, 30011)
+        );
+        assert_eq!(result.results.len(), 10);
+        assert_eq!(
+            result.results[0].property_identifier,
+            PropertyIdentifier::ObjectIdentifier
+        );
+        assert_eq!(
+            result.results[0].value,
+            PropertyResultValue::Value(vec![property::PropertyValue::ObjectIdentifier(
+                ObjectIdentifier::new(ObjectType::AnalogValue, 30011)
+            )])
+        );
+        assert_eq!(
+            result.results[1].property_identifier,
+            PropertyIdentifier::ObjectName
+        );
+        assert_eq!(
+            result.results[1].value,
+            PropertyResultValue::Value(vec![property::PropertyValue::CharacterString(
+                "HS1Curve_Y3".to_string()
+            )])
+        );
+        assert_eq!(
+            result.results[2].property_identifier,
+            PropertyIdentifier::ObjectType
+        );
+        assert_eq!(
+            result.results[2].value,
+            PropertyResultValue::Value(vec![property::PropertyValue::Enumerated(
+                ObjectType::AnalogValue.into()
+            )])
+        );
+        assert_eq!(
+            result.results[3].property_identifier,
+            PropertyIdentifier::PresentValue
+        );
+        assert_eq!(
+            result.results[3].value,
+            PropertyResultValue::Value(vec![property::PropertyValue::Real(59.0)])
+        );
+        assert_eq!(
+            result.results[4].property_identifier,
+            PropertyIdentifier::StatusFlags
+        );
+        assert_eq!(
+            result.results[4].value,
+            PropertyResultValue::Value(vec![property::PropertyValue::BitString(vec![
+                false, false, false, false
+            ])])
+        );
+        assert_eq!(
+            result.results[5].property_identifier,
+            PropertyIdentifier::EventState
+        );
+        assert_eq!(
+            result.results[5].value,
+            PropertyResultValue::Value(vec![property::PropertyValue::Enumerated(0)])
+        );
+        assert_eq!(
+            result.results[6].property_identifier,
+            PropertyIdentifier::OutOfService
+        );
+        assert_eq!(
+            result.results[6].value,
+            PropertyResultValue::Value(vec![property::PropertyValue::Boolean(false)])
+        );
+        assert_eq!(
+            result.results[7].property_identifier,
+            PropertyIdentifier::Units
+        );
+        assert_eq!(
+            result.results[7].value,
+            PropertyResultValue::Value(vec![property::PropertyValue::Enumerated(62)])
+        );
+        assert_eq!(
+            result.results[8].property_identifier,
+            PropertyIdentifier::Description
+        );
+        assert_eq!(
+            result.results[8].value,
+            PropertyResultValue::Value(vec![property::PropertyValue::CharacterString(
+                "Setpoint for third curvepoint for outdoor compensated setpoint HS1".to_string()
+            )])
+        );
+        assert_eq!(
+            result.results[9].property_identifier,
+            PropertyIdentifier::Reliability
+        );
+        assert_eq!(
+            result.results[9].value,
+            PropertyResultValue::Value(vec![property::PropertyValue::Enumerated(0)])
+        );
     }
 }

@@ -16,7 +16,7 @@ use crate::{
         advanced::bitstring::decode_bit_string, decode_application_tag, decode_boolean,
         decode_character_string, decode_date, decode_double, decode_enumerated,
         decode_object_identifier, decode_octet_string, decode_real, decode_signed64, decode_time,
-        decode_unsigned64,
+        decode_unsigned64, EncodingError,
     },
     object::{EngineeringUnits, ObjectIdentifier},
     ApplicationTag,
@@ -116,7 +116,7 @@ impl Display for PropertyValue {
 
 /// Decode engineering units enumeration
 pub fn decode_units(data: &[u8]) -> Option<(EngineeringUnits, usize)> {
-    if let Some((PropertyValue::Enumerated(units_id), consumed)) = decode_property_value(data) {
+    if let Ok((PropertyValue::Enumerated(units_id), consumed)) = decode_property_value(data) {
         let units = EngineeringUnits::from(units_id);
         Some((units, consumed))
     } else {
@@ -126,7 +126,7 @@ pub fn decode_units(data: &[u8]) -> Option<(EngineeringUnits, usize)> {
 
 /// Decode status flags specifically
 pub fn decode_status_flags(data: &[u8]) -> Option<(Vec<bool>, usize)> {
-    if let Some((PropertyValue::BitString(bits), consumed)) = decode_property_value(data) {
+    if let Ok((PropertyValue::BitString(bits), consumed)) = decode_property_value(data) {
         // Status flags are typically 4 bits: in-alarm, fault, overridden, out-of-service
         Some((bits, consumed))
     } else {
@@ -135,69 +135,69 @@ pub fn decode_status_flags(data: &[u8]) -> Option<(Vec<bool>, usize)> {
 }
 
 /// Generic property value decoder - tries multiple decoders
-pub fn decode_property_value(data: &[u8]) -> Option<(PropertyValue, usize)> {
+pub fn decode_property_value(data: &[u8]) -> Result<(PropertyValue, usize), EncodingError> {
     if data.is_empty() {
-        return None;
+        return Err(EncodingError::InvalidTag);
     }
 
-    let (tag, length, consumed) = decode_application_tag(data).ok()?; // TODO: handle errors
+    let (tag, length, consumed) = decode_application_tag(data)?;
 
     match tag {
-        ApplicationTag::Null => Some((PropertyValue::Null, consumed)),
+        ApplicationTag::Null => Ok((PropertyValue::Null, consumed)),
         ApplicationTag::Boolean => {
-            let (value, consumed) = decode_boolean(data).ok()?;
-            Some((PropertyValue::Boolean(value), consumed))
+            let (value, consumed) = decode_boolean(data)?;
+            Ok((PropertyValue::Boolean(value), consumed))
         }
         ApplicationTag::UnsignedInt => {
-            let (value, consumed) = decode_unsigned64(data).ok()?;
-            Some((PropertyValue::Unsigned(value), consumed))
+            let (value, consumed) = decode_unsigned64(data)?;
+            Ok((PropertyValue::Unsigned(value), consumed))
         }
         ApplicationTag::SignedInt => {
-            let (value, consumed) = decode_signed64(data).ok()?;
-            Some((PropertyValue::Signed(value), consumed))
+            let (value, consumed) = decode_signed64(data)?;
+            Ok((PropertyValue::Signed(value), consumed))
         }
         ApplicationTag::Real => {
-            let (value, consumed) = decode_real(data).ok()?;
-            Some((PropertyValue::Real(value), consumed))
+            let (value, consumed) = decode_real(data)?;
+            Ok((PropertyValue::Real(value), consumed))
         }
         ApplicationTag::Double => {
-            let (value, consumed) = decode_double(data).ok()?;
-            Some((PropertyValue::Double(value), consumed))
+            let (value, consumed) = decode_double(data)?;
+            Ok((PropertyValue::Double(value), consumed))
         }
         ApplicationTag::OctetString => {
-            let (value, consumed) = decode_octet_string(data).ok()?;
-            Some((PropertyValue::OctetString(value), consumed))
+            let (value, consumed) = decode_octet_string(data)?;
+            Ok((PropertyValue::OctetString(value), consumed))
         }
         ApplicationTag::CharacterString => {
-            let (value, consumed) = decode_character_string(data).ok()?;
-            Some((PropertyValue::CharacterString(value), consumed))
+            let (value, consumed) = decode_character_string(data)?;
+            Ok((PropertyValue::CharacterString(value), consumed))
         }
         ApplicationTag::BitString => {
-            let (value, consumed) = decode_bit_string(data).ok()?;
-            Some((PropertyValue::BitString(value), consumed))
+            let (value, consumed) = decode_bit_string(data)?;
+            Ok((PropertyValue::BitString(value), consumed))
         }
         ApplicationTag::Enumerated => {
-            let (value, consumed) = decode_enumerated(data).ok()?;
-            Some((PropertyValue::Enumerated(value), consumed))
+            let (value, consumed) = decode_enumerated(data)?;
+            Ok((PropertyValue::Enumerated(value), consumed))
         }
         ApplicationTag::Date => {
-            let ((year, month, day, weekday), consumed) = decode_date(data).ok()?;
-            Some((PropertyValue::Date(year, month, day, weekday), consumed))
+            let ((year, month, day, weekday), consumed) = decode_date(data)?;
+            Ok((PropertyValue::Date(year, month, day, weekday), consumed))
         }
         ApplicationTag::Time => {
-            let ((hour, minute, second, hundredths), consumed) = decode_time(data).ok()?;
-            Some((
+            let ((hour, minute, second, hundredths), consumed) = decode_time(data)?;
+            Ok((
                 PropertyValue::Time(hour, minute, second, hundredths),
                 consumed,
             ))
         }
         ApplicationTag::ObjectIdentifier => {
-            let (value, consumed) = decode_object_identifier(data).ok()?;
-            Some((PropertyValue::ObjectIdentifier(value), consumed))
+            let (value, consumed) = decode_object_identifier(data)?;
+            Ok((PropertyValue::ObjectIdentifier(value), consumed))
         }
         _ => {
             // Unknown tag - return raw data
-            Some((PropertyValue::Unknown(data.to_vec()), consumed + length))
+            Ok((PropertyValue::Unknown(data.to_vec()), consumed + length))
         }
     }
 }
