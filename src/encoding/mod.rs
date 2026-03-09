@@ -650,8 +650,18 @@ pub fn decode_character_string(data: &[u8]) -> Result<(String, usize)> {
 
     let string_data = &data[consumed..consumed + length - 1];
     let value = match encoding {
-        0x00 => String::from_utf8(string_data.to_vec())
-            .map_err(|_| EncodingError::InvalidFormat("Invalid UTF-8 string".to_string()))?,
+        0x00 => String::from_utf8(string_data.to_vec()).unwrap_or({
+            let mut utf8_data = vec![0u8; string_data.len() * 2];
+            encoding_rs::mem::convert_latin1_to_utf8(string_data, utf8_data.as_mut_slice());
+
+            String::from_utf8_lossy(&utf8_data).to_string()
+        }),
+        0x05 => {
+            let mut utf8_data = vec![0u8; string_data.len() * 2];
+            encoding_rs::mem::convert_latin1_to_utf8(string_data, utf8_data.as_mut_slice());
+
+            String::from_utf8_lossy(&utf8_data).to_string()
+        }
         _ => String::default(),
     };
 
