@@ -203,6 +203,60 @@ pub enum ApplicationTag {
     Reserved15 = 15,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BACnetTag {
+    Application(ApplicationTag),
+    Context(u8),
+}
+
+pub fn decode_tag(data: &[u8]) -> Result<(BACnetTag, usize, usize)> {
+    if data.is_empty() {
+        return Err(EncodingError::InvalidTag);
+    }
+
+    let tag_byte = data[0];
+    let tag_type = tag_byte & 0x08;
+    let mut length = (tag_byte & 0x07) as usize;
+    let mut consumed = 1;
+
+    let tag = if tag_type == 0 {
+        BACnetTag::Application(ApplicationTag::try_from(tag_byte >> 4)?)
+    } else {
+        BACnetTag::Context(tag_byte >> 4)
+    };
+
+    if length == 5 {
+        if data.len() < 2 {
+            return Err(EncodingError::BufferUnderflow);
+        }
+
+        let len_byte = data[1];
+        consumed += 1;
+
+        match len_byte {
+            0..=253 => {
+                length = len_byte as usize;
+            }
+            254 => {
+                if data.len() < 4 {
+                    return Err(EncodingError::BufferUnderflow);
+                }
+                length = u16::from_be_bytes([data[2], data[3]]) as usize;
+                consumed += 2;
+            }
+            255 => {
+                if data.len() < 6 {
+                    return Err(EncodingError::BufferUnderflow);
+                }
+                length = u32::from_be_bytes([data[2], data[3], data[4], data[5]]) as usize;
+                consumed += 4;
+            }
+        }
+    }
+
+    Ok((tag, length, consumed))
+}
+
 /// Encode a BACnet application tag
 pub fn encode_application_tag(buffer: &mut Vec<u8>, tag: ApplicationTag, length: usize) {
     let tag_byte = if length < 5 {
@@ -2543,5 +2597,32 @@ mod tests {
             let (value, _) = decode_unsigned64(&buffer).unwrap();
             assert_eq!(value, test_value);
         }
+    }
+
+    #[test]
+    fn test_decode_bacnet_tag() {
+        let data = [0x21];
+        let (tag, length, consumed) = decode_tag(&data).unwrap();
+        assert_eq!(tag, BACnetTag::Application(ApplicationTag::UnsignedInt));
+        assert_eq!(length, 1);
+        assert_eq!(consumed, 1);
+
+        let data = [0x1E];
+        let (tag, length, consumed) = decode_tag(&data).unwrap();
+        assert_eq!(tag, BACnetTag::Context(1));
+        assert_eq!(length, 6);
+        assert_eq!(consumed, 1);
+
+        let data = [0x0C];
+        let (tag, length, consumed) = decode_tag(&data).unwrap();
+        assert_eq!(tag, BACnetTag::Context(0));
+        assert_eq!(length, 4);
+        assert_eq!(consumed, 1);
+
+        let data = [0x35, 0x08];
+        let (tag, length, consumed) = decode_tag(&data).unwrap();
+        assert_eq!(tag, BACnetTag::Application(ApplicationTag::SignedInt));
+        assert_eq!(length, 8);
+        assert_eq!(consumed, 2);
     }
 }
