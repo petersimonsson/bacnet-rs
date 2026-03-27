@@ -1,19 +1,41 @@
 # BACnet-RS
 
-A comprehensive BACnet (Building Automation and Control Networks) protocol stack implementation in Rust.
+A BACnet (Building Automation and Control Networks) protocol stack implementation in Rust.
+
+> **Note:** This library is under active development and not yet production-ready. APIs may change between releases.
+> Contributions and feedback are welcome.
 
 ## Overview
 
-This library provides a complete implementation of the BACnet protocol stack in Rust, designed as a modern alternative to the official C BACnet stack. It supports multiple data link layers, all standard BACnet services, and is suitable for both embedded and desktop applications.
+This library provides an implementation of the BACnet protocol stack in Rust, targeting compliance with ANSI/ASHRAE
+Standard 135-2024. It supports multiple data link layers, core BACnet services, and is designed for both embedded and
+desktop applications.
 
-## Features
+## Implementation Status
 
-- **Complete BACnet Implementation**: All standard objects, services, and data types
-- **Multiple Data Links**: BACnet/IP, MS/TP, Ethernet support
-- **Embedded Ready**: Designed for resource-constrained environments
-- **Async Support**: Optional async/await support with Tokio for network operations
-- **Type Safe**: Leverages Rust's type system to prevent protocol errors
-- **High Performance**: Zero-copy design with minimal allocations
+| Component                  | Status          | Notes                                                   |
+|----------------------------|-----------------|---------------------------------------------------------|
+| **Encoding/Decoding**      | Working         | ASN.1 application and context tags, all primitive types |
+| **BACnet/IP (Annex J)**    | Working         | BVLC, BBMD, Foreign Device registration                 |
+| **MS/TP (Clause 9)**       | Working         | Frame encoding, CRC, token-passing                      |
+| **Ethernet (Clause 7)**    | Working         | 802.3 frames, LLC headers                               |
+| **Who-Is / I-Am**          | Working         | Device discovery                                        |
+| **Read Property**          | Working         | Single property read                                    |
+| **Read Property Multiple** | Working         | Batch property reads                                    |
+| **Write Property**         | Working         | Single property write                                   |
+| **Subscribe COV**          | Working         | Change-of-value subscriptions                           |
+| **Atomic File Read/Write** | Working         | Stream and record access                                |
+| **Time Synchronization**   | Working         | Standard and UTC                                        |
+| **Analog Objects**         | Working         | Input, Output, Value with priority arrays               |
+| **Binary Objects**         | Working         | Input, Output, Value with priority arrays               |
+| **Multistate Objects**     | Working         | Input, Output, Value                                    |
+| **File / Device Objects**  | Working         | Basic property support                                  |
+| **Client API**             | Partial         | Discovery and read-only via BACnet/IP only              |
+| **Segmentation**           | Not implemented | Large message segmentation/reassembly                   |
+| **Alarm & Event**          | Not implemented | Intrinsic and algorithmic reporting                     |
+| **Trending**               | Not implemented | Trend log objects                                       |
+| **Scheduling**             | Not implemented | Schedule and calendar objects                           |
+| **BACnet/SC (Annex AB)**   | Not implemented | Secure Connect                                          |
 
 ## Quick Start
 
@@ -39,12 +61,17 @@ bacnet-rs = { version = "0.2", default-features = false, features = ["std"] }
 
 The stack is organized into layered modules:
 
-- **Encoding**: BACnet data encoding/decoding
-- **Datalink**: Network transport implementations
-- **Network**: NPDU handling and routing
-- **Service**: BACnet service implementations
-- **Object**: Standard BACnet object types
-- **Application**: High-level API
+- **Encoding** (`src/encoding/`): BACnet data encoding/decoding, ASN.1 tag handling
+- **Datalink** (`src/datalink/`): BACnet/IP, MS/TP, Ethernet implementations
+- **Network** (`src/network/`): NPDU handling and routing
+- **Service** (`src/service/`): BACnet service request/response implementations
+- **Object** (`src/object/`): Standard BACnet object types and database
+- **Application** (`src/app/`): APDU handling and segmentation
+- **Client** (`src/client.rs`): High-level BACnet client API
+
+## Contributing
+
+Contributions are welcome. Please open an issue or pull request.
 
 ## License
 
