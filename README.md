@@ -43,7 +43,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bacnet-rs = "0.2"
+bacnet-rs = "0.3"
 ```
 
 ### Feature Flags
@@ -54,7 +54,7 @@ bacnet-rs = "0.2"
 
 To use without async support:
 ```toml
-bacnet-rs = { version = "0.2", default-features = false, features = ["std"] }
+bacnet-rs = { version = "0.3", default-features = false, features = ["std"] }
 ```
 
 ## Architecture
