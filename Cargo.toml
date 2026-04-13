@@ -1,9 +1,9 @@
 [package]
 name = "bacnet-rs"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
-authors = ["Tom van Hest <tomvanhest@pm.me>"]
-description = "A complete BACnet protocol stack implementation in Rust"
+authors = ["bacet-rs contributors"]
+description = "BACnet protocol stack implementation in Rust"
 documentation = "https://docs.rs/bacnet-rs"
 homepage = "https://github.com/Heliopshan/bacnet-rs"
 repository = "https://github.com/Heliopshan/bacnet-rs"
