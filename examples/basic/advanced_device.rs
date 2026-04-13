@@ -117,15 +117,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ao_id = ObjectIdentifier::new(ObjectType::AnalogOutput, 1);
 
     let ai_props = vec![
-        PropertyReference::new(PropertyIdentifier::ObjectName.into()),
-        PropertyReference::new(PropertyIdentifier::PresentValue.into()),
-        PropertyReference::new(PropertyIdentifier::OutOfService.into()),
+        PropertyReference::new(PropertyIdentifier::ObjectName),
+        PropertyReference::new(PropertyIdentifier::PresentValue),
+        PropertyReference::new(PropertyIdentifier::OutOfService),
     ];
 
     let ao_props = vec![
-        PropertyReference::new(PropertyIdentifier::ObjectName.into()),
-        PropertyReference::new(PropertyIdentifier::PresentValue.into()),
-        PropertyReference::new(PropertyIdentifier::PriorityArray.into()),
+        PropertyReference::new(PropertyIdentifier::ObjectName),
+        PropertyReference::new(PropertyIdentifier::PresentValue),
+        PropertyReference::new(PropertyIdentifier::PriorityArray),
     ];
 
     let ai_spec = ReadAccessSpecification::new(ai_id, ai_props);

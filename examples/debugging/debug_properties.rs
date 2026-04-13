@@ -6,7 +6,7 @@
 use bacnet_rs::{
     app::{Apdu, MaxApduSize, MaxSegments},
     network::Npdu,
-    object::{ObjectIdentifier, ObjectType},
+    object::{ObjectIdentifier, ObjectType, PropertyIdentifier},
     property::decode_units,
     service::{
         ConfirmedServiceChoice, IAmRequest, PropertyReference, ReadAccessSpecification,
@@ -52,10 +52,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let property_refs = vec![
-        PropertyReference::new(77),  // Object_Name
-        PropertyReference::new(28),  // Description
-        PropertyReference::new(85),  // Present_Value
-        PropertyReference::new(117), // Units
+        PropertyReference::new(PropertyIdentifier::ObjectName), // Object_Name
+        PropertyReference::new(PropertyIdentifier::Description), // Description
+        PropertyReference::new(PropertyIdentifier::PresentValue), // Present_Value
+        PropertyReference::new(PropertyIdentifier::Units),      // Units
     ];
 
     let read_spec = ReadAccessSpecification::new(test_object, property_refs);
@@ -396,25 +396,7 @@ fn encode_rpm_request(
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let mut buffer = Vec::new();
 
-    for spec in &request.read_access_specifications {
-        let object_id: u32 = spec.object_identifier.try_into()?;
-        buffer.push(0x0C);
-        buffer.extend_from_slice(&object_id.to_be_bytes());
-
-        buffer.push(0x1E);
-
-        for prop_ref in &spec.property_references {
-            buffer.push(0x09);
-            buffer.push(prop_ref.property_identifier as u8);
-
-            if let Some(array_index) = prop_ref.property_array_index {
-                buffer.push(0x19);
-                buffer.push(array_index as u8);
-            }
-        }
-
-        buffer.push(0x1F);
-    }
+    request.encode(&mut buffer)?;
 
     Ok(buffer)
 }
