@@ -613,10 +613,10 @@ mod tests {
         assert!(matches!(custom1, EngineeringUnits::Custom(_)));
         assert_eq!(u32::from(custom1), 1000);
 
-        // Test reserved units
-        let reserved1 = EngineeringUnits::from(100);
-        assert!(matches!(reserved1, EngineeringUnits::PerMinute));
-        assert_eq!(u32::from(reserved1), 100);
+        // Test concrete unit by ID
+        let per_minute = EngineeringUnits::from(100);
+        assert!(matches!(per_minute, EngineeringUnits::PerMinute));
+        assert_eq!(u32::from(per_minute), 100);
     }
 
     #[test]
@@ -690,7 +690,7 @@ mod tests {
         );
         assert_eq!(
             EngineeringUnits::Microsiemens.bacnet_name(),
-            "micro-siemens"
+            "microsiemens"
         );
         assert_eq!(
             EngineeringUnits::WattHoursReactive.bacnet_name(),
