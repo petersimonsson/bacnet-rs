@@ -320,7 +320,7 @@ generate_engineering_units! {
         WattsPerMeterPerKelvin = 189 => "watts-per-meter-per-kelvin" "W/(m·K)",
 
         // 190-199: Conductance, flow, length, mass, volume, acoustics
-        Microsiemens = 190 => "micro-siemens" "µS",
+        Microsiemens = 190 => "microsiemens" "µS",
         CubicFeetPerHour = 191 => "cubic-feet-per-hour" "cfh",
         UsGallonsPerHour = 192 => "us-gallons-per-hour" "gph (US)",
         Kilometers = 193 => "kilometers" "km",
