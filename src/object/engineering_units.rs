@@ -688,10 +688,7 @@ mod tests {
             EngineeringUnits::JoulesPerKilogramKelvin.bacnet_name(),
             "joules-per-kilogram-per-kelvin"
         );
-        assert_eq!(
-            EngineeringUnits::Microsiemens.bacnet_name(),
-            "microsiemens"
-        );
+        assert_eq!(EngineeringUnits::Microsiemens.bacnet_name(), "microsiemens");
         assert_eq!(
             EngineeringUnits::WattHoursReactive.bacnet_name(),
             "watt-reactive-hours"
