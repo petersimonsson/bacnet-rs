@@ -575,10 +575,11 @@ fn read_property(
 
                             if resp_invoke_id == (invoke_id & 0x0F) {
                                 match pdu_type {
-                                    0x3 => {
+                                    0x3
                                         // PDU_TYPE_COMPLEX_ACK
                                         // Complex ACK format: [PDU_TYPE+invoke_id] [service_choice] [service_data...]
-                                        if apdu_data.len() >= 2 && apdu_data[1] == 0x0C {
+                                    if apdu_data.len() >= 2 && apdu_data[1] == 0x0C =>
+                                        {
                                             // SERVICE_CONFIRMED_READ_PROPERTY
                                             // Parse ReadProperty-ACK service data starting at byte 2
                                             if let Ok(response) =
@@ -597,7 +598,6 @@ fn read_property(
                                                 return parse_read_property_ack_manual(
                                                     &apdu_data[2..],
                                                 );
-                                            }
                                         }
                                     }
                                     0x5 => {
