@@ -5,7 +5,7 @@
 
 #[cfg(feature = "std")]
 use std::{
-    net::{SocketAddr, UdpSocket},
+    net::{Ipv4Addr, SocketAddr, ToSocketAddrs, UdpSocket},
     time::{Duration, Instant},
 };
 
@@ -65,9 +65,12 @@ impl BacnetClient {
         })
     }
 
-    /// Create a new BACnet client with specific ephemeral port
-    pub fn new_with_local_port(port: u16) -> Result<Self, Box<dyn std::error::Error>> {
-        let socket = UdpSocket::bind(format!("0.0.0.0:{}", port))?;
+    /// Create a new BACnet client with a specific socket address (should implement the
+    /// ToSocketAddrs trait)
+    pub fn new_with_local_addr<A: ToSocketAddrs>(
+        addr: A,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let socket = UdpSocket::bind(addr)?;
         socket.set_read_timeout(Some(Duration::from_secs(5)))?;
 
         Ok(Self {
