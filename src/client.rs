@@ -5,7 +5,7 @@
 
 #[cfg(feature = "std")]
 use std::{
-    net::{Ipv4Addr, SocketAddr, ToSocketAddrs, UdpSocket},
+    net::{SocketAddr, ToSocketAddrs, UdpSocket},
     time::{Duration, Instant},
 };
 
