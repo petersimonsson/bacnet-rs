@@ -94,6 +94,16 @@ impl BacnetClient {
         ClientBuilder::new()
     }
 
+    /// The per-request timeout this client is configured with.
+    pub fn timeout(&self) -> Duration {
+        self.timeout
+    }
+
+    /// The local socket address the client is bound to.
+    pub fn local_addr(&self) -> Result<SocketAddr, ClientError> {
+        Ok(self.socket.local_addr()?)
+    }
+
     /// Construct a client from a fully-specified [`ClientConfig`], binding the
     /// UDP socket.
     pub(crate) fn from_config(config: ClientConfig) -> Result<Self, ClientError> {
@@ -545,5 +555,47 @@ mod tests {
         let decoded = ObjectIdentifier::from(encoded);
         assert_eq!(decoded.object_type, ObjectType::Device);
         assert_eq!(decoded.instance, 5047);
+    }
+
+    #[test]
+    fn test_config_defaults() {
+        let config = ClientConfig::default();
+        assert_eq!(config.host, DEFAULT_HOST);
+        assert_eq!(config.port, 0);
+        assert_eq!(config.timeout, DEFAULT_TIMEOUT);
+        assert_eq!(config.retries, 0);
+        assert_eq!(config.bind_addr(), "0.0.0.0:0");
+    }
+
+    #[test]
+    fn test_builder_sets_fields() {
+        // Bind to loopback on an OS-assigned port so the test is hermetic.
+        let client = BacnetClient::builder()
+            .local_addr("127.0.0.1")
+            .port(0)
+            .timeout(Duration::from_millis(250))
+            .retries(3)
+            .build()
+            .expect("client should bind");
+
+        assert_eq!(client.timeout(), Duration::from_millis(250));
+        assert_eq!(client.retries, 3);
+
+        let local = client.local_addr().expect("local addr");
+        assert!(local.ip().is_loopback());
+        assert_ne!(local.port(), 0, "OS should assign a real port");
+    }
+
+    #[test]
+    fn test_new_uses_defaults() {
+        let client = BacnetClient::new().expect("client should bind");
+        assert_eq!(client.timeout(), DEFAULT_TIMEOUT);
+    }
+
+    #[test]
+    fn test_error_display() {
+        assert_eq!(ClientError::Timeout.to_string(), "request timed out");
+        let pe = ClientError::PropertyError { class: 1, code: 31 };
+        assert_eq!(pe.to_string(), "BACnet error (class 1, code 31)");
     }
 }
