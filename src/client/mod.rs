@@ -31,8 +31,9 @@ use crate::{
     object::{EngineeringUnits, ObjectIdentifier, ObjectType, PropertyIdentifier, Segmentation},
     property::PropertyValue,
     service::{
-        ConfirmedServiceChoice, IAmRequest, PropertyReference, ReadAccessSpecification,
-        ReadPropertyMultipleRequest, UnconfirmedServiceChoice, WhoIsRequest,
+        ConfirmedServiceChoice, IAmRequest, PropertyReference, PropertyResultValue,
+        ReadAccessResult, ReadAccessSpecification, ReadPropertyMultipleRequest,
+        ReadPropertyMultipleResponse, UnconfirmedServiceChoice, WhoIsRequest,
     },
 };
 
@@ -176,7 +177,57 @@ impl BacnetClient {
             &self.encode_rpm_request(&rpm_request)?,
         )?;
 
-        self.parse_object_list_response(&response_data)
+        // The Object_List property comes back as a list of object identifiers
+        // inside the ReadPropertyMultiple result. Prefer the structured decoder;
+        // the device object itself is dropped.
+        let mut objects = Vec::new();
+        if let Ok(response) = ReadPropertyMultipleResponse::decode(&response_data) {
+            for access in response.read_access_results {
+                for result in access.results {
+                    if let PropertyResultValue::Value(values) = result.value {
+                        for value in values {
+                            if let PropertyValue::ObjectIdentifier(oid) = value {
+                                if oid.object_type != ObjectType::Device {
+                                    objects.push(oid);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Backstop: if the structured decode produced nothing (e.g. an encoding
+        // variant it doesn't yet fully handle), scan the raw response for object
+        // identifiers so discovery still works.
+        if objects.is_empty() {
+            objects = Self::scan_object_identifiers(&response_data);
+        }
+
+        Ok(objects)
+    }
+
+    /// Scan a raw response buffer for application-tagged object identifiers
+    /// (tag `0xC4`), skipping the device object. Used as a fallback when the
+    /// structured ReadPropertyMultiple decoder yields nothing.
+    fn scan_object_identifiers(data: &[u8]) -> Vec<ObjectIdentifier> {
+        let mut objects = Vec::new();
+        let mut pos = 0;
+
+        while pos + 5 <= data.len() {
+            if data[pos] == 0xC4 {
+                let obj_id_bytes = [data[pos + 1], data[pos + 2], data[pos + 3], data[pos + 4]];
+                let identifier: ObjectIdentifier = u32::from_be_bytes(obj_id_bytes).into();
+                if identifier.object_type != ObjectType::Device {
+                    objects.push(identifier);
+                }
+                pos += 5;
+            } else {
+                pos += 1;
+            }
+        }
+
+        objects
     }
 
     /// Read properties for multiple objects
@@ -238,8 +289,12 @@ impl BacnetClient {
                 &self.encode_rpm_request(&rpm_request)?,
             ) {
                 Ok(response_data) => {
-                    match self.parse_rpm_response(&response_data, chunk) {
-                        Ok(mut batch_info) => objects_info.append(&mut batch_info),
+                    match ReadPropertyMultipleResponse::decode(&response_data) {
+                        Ok(response) => {
+                            for access in response.read_access_results {
+                                objects_info.push(Self::object_info_from_access(access));
+                            }
+                        }
                         Err(_) => {
                             // Add objects with minimal info on parse failure
                             for obj in chunk {
@@ -497,81 +552,58 @@ impl BacnetClient {
         Ok(buffer)
     }
 
-    /// Parse object list response
-    fn parse_object_list_response(
-        &self,
-        data: &[u8],
-    ) -> Result<Vec<ObjectIdentifier>, ClientError> {
-        let mut objects = Vec::new();
-        let mut pos = 0;
+    /// Map a decoded ReadPropertyMultiple result for a single object into the
+    /// client's [`ObjectInfo`] view, pulling out the common properties.
+    ///
+    /// Per-property errors (`PropertyResultValue::Error`) are skipped, leaving
+    /// that field `None`.
+    fn object_info_from_access(access: ReadAccessResult) -> ObjectInfo {
+        let mut info = ObjectInfo {
+            object_identifier: access.object_identifier,
+            object_name: None,
+            description: None,
+            present_value: None,
+            units: None,
+            status_flags: None,
+        };
 
-        // Scan for object identifiers (0xC4 tag)
-        while pos + 5 <= data.len() {
-            if data[pos] == 0xC4 {
-                pos += 1;
-                let obj_id_bytes = [data[pos], data[pos + 1], data[pos + 2], data[pos + 3]];
-                let obj_id = u32::from_be_bytes(obj_id_bytes);
-
-                let identifier: ObjectIdentifier = obj_id.into();
-                // Skip device object itself
-                if identifier.object_type != ObjectType::Device {
-                    objects.push(identifier);
-                }
-
-                pos += 4;
-            } else {
-                pos += 1;
-            }
-        }
-
-        Ok(objects)
-    }
-
-    /// Parse ReadPropertyMultiple response
-    fn parse_rpm_response(
-        &self,
-        data: &[u8],
-        objects: &[ObjectIdentifier],
-    ) -> Result<Vec<ObjectInfo>, ClientError> {
-        let mut objects_info = Vec::new();
-
-        // Simple implementation - create ObjectInfo for each requested object
-        for obj in objects {
-            let mut object_info = ObjectInfo {
-                object_identifier: *obj,
-                object_name: None,
-                description: None,
-                present_value: None,
-                units: None,
-                status_flags: None,
+        for result in access.results {
+            let values = match result.value {
+                PropertyResultValue::Value(values) => values,
+                PropertyResultValue::Error(..) => continue,
             };
+            let first = values.into_iter().next();
 
-            // Parse properties from response data
-            // This is a simplified implementation - in practice you'd need more robust parsing
-            if let Some(PropertyValue::CharacterString(s)) = extract_property_value(data, 77) {
-                object_info.object_name = Some(s);
+            match result.property_identifier {
+                PropertyIdentifier::ObjectName => {
+                    if let Some(PropertyValue::CharacterString(s)) = first {
+                        info.object_name = Some(s);
+                    }
+                }
+                PropertyIdentifier::Description => {
+                    if let Some(PropertyValue::CharacterString(s)) = first {
+                        info.description = Some(s);
+                    }
+                }
+                PropertyIdentifier::PresentValue => {
+                    info.present_value = first;
+                }
+                PropertyIdentifier::Units => {
+                    if let Some(PropertyValue::Enumerated(units_id)) = first {
+                        info.units = Some(EngineeringUnits::from(units_id));
+                    }
+                }
+                PropertyIdentifier::StatusFlags => {
+                    if let Some(PropertyValue::BitString(bits)) = first {
+                        info.status_flags = Some(bits);
+                    }
+                }
+                _ => {}
             }
-
-            if let Some(PropertyValue::CharacterString(s)) = extract_property_value(data, 28) {
-                object_info.description = Some(s);
-            }
-
-            if let Some(value) = extract_property_value(data, 85) {
-                object_info.present_value = Some(value);
-            }
-
-            objects_info.push(object_info);
         }
 
-        Ok(objects_info)
+        info
     }
-}
-
-/// Extract property value from encoded data (simplified implementation)
-fn extract_property_value(_data: &[u8], _property_id: u32) -> Option<PropertyValue> {
-    // This would need a full implementation based on BACnet encoding rules
-    // For now, return None as a placeholder
-    None
 }
 
 #[cfg(test)]
