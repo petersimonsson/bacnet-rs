@@ -2,12 +2,22 @@
 //!
 //! This module provides high-level client utilities for common BACnet operations
 //! such as device discovery, object enumeration, and property reading.
+//!
+//! The entry point is [`BacnetClient`]. Construct one with [`BacnetClient::new`]
+//! for defaults, or with [`BacnetClient::builder`] to customize the local
+//! interface, port, timeout, and retries. All methods return [`ClientError`] on
+//! failure.
+
+mod config;
+mod error;
+
+pub use config::{ClientBuilder, ClientConfig, DEFAULT_HOST, DEFAULT_TIMEOUT};
+pub use error::ClientError;
 
 #[cfg(feature = "std")]
-use std::{
-    net::{SocketAddr, ToSocketAddrs, UdpSocket},
-    time::{Duration, Instant},
-};
+use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+#[cfg(feature = "std")]
+use std::time::{Duration, Instant};
 
 #[cfg(not(feature = "std"))]
 use alloc::{collections::BTreeMap as HashMap, string::String, vec::Vec};
@@ -28,6 +38,10 @@ use crate::{
 pub struct BacnetClient {
     socket: UdpSocket,
     timeout: Duration,
+    /// Number of retries after an initial timeout (reserved for future use by
+    /// the request paths; not yet applied by the existing methods).
+    #[allow(dead_code)]
+    retries: u8,
 }
 
 /// Discovered BACnet device information
@@ -54,36 +68,47 @@ pub struct ObjectInfo {
 
 #[cfg(feature = "std")]
 impl BacnetClient {
-    /// Create a new BACnet client
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let socket = UdpSocket::bind("0.0.0.0:0")?;
-        socket.set_read_timeout(Some(Duration::from_secs(5)))?;
+    /// Create a new BACnet client with default configuration.
+    ///
+    /// Binds to all interfaces on an OS-assigned ephemeral port with a 5 second
+    /// timeout. Use [`BacnetClient::builder`] to customize.
+    pub fn new() -> Result<Self, ClientError> {
+        Self::from_config(ClientConfig::default())
+    }
+
+    /// Create a new BACnet client with a specific local socket address (any
+    /// type implementing [`ToSocketAddrs`]).
+    pub fn new_with_local_addr<A: ToSocketAddrs>(addr: A) -> Result<Self, ClientError> {
+        let socket = UdpSocket::bind(addr)?;
+        socket.set_read_timeout(Some(DEFAULT_TIMEOUT))?;
 
         Ok(Self {
             socket,
-            timeout: Duration::from_secs(5),
+            timeout: DEFAULT_TIMEOUT,
+            retries: 0,
         })
     }
 
-    /// Create a new BACnet client with a specific socket address (should implement the
-    /// ToSocketAddrs trait)
-    pub fn new_with_local_addr<A: ToSocketAddrs>(
-        addr: A,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let socket = UdpSocket::bind(addr)?;
-        socket.set_read_timeout(Some(Duration::from_secs(5)))?;
+    /// Begin building a client with custom configuration.
+    pub fn builder() -> ClientBuilder {
+        ClientBuilder::new()
+    }
+
+    /// Construct a client from a fully-specified [`ClientConfig`], binding the
+    /// UDP socket.
+    pub(crate) fn from_config(config: ClientConfig) -> Result<Self, ClientError> {
+        let socket = UdpSocket::bind(config.bind_addr())?;
+        socket.set_read_timeout(Some(config.timeout))?;
 
         Ok(Self {
             socket,
-            timeout: Duration::from_secs(5),
+            timeout: config.timeout,
+            retries: config.retries,
         })
     }
 
     /// Discover a device by IP address
-    pub fn discover_device(
-        &self,
-        target_addr: SocketAddr,
-    ) -> Result<DeviceInfo, Box<dyn std::error::Error>> {
+    pub fn discover_device(&self, target_addr: SocketAddr) -> Result<DeviceInfo, ClientError> {
         // Send Who-Is request
         let whois = WhoIsRequest::new();
         let mut buffer = Vec::new();
@@ -114,7 +139,7 @@ impl BacnetClient {
             }
         }
 
-        Err("Device discovery timeout".into())
+        Err(ClientError::Timeout)
     }
 
     /// Read the device's object list
@@ -122,7 +147,7 @@ impl BacnetClient {
         &self,
         target_addr: SocketAddr,
         device_id: u32,
-    ) -> Result<Vec<ObjectIdentifier>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<ObjectIdentifier>, ClientError> {
         let device_object = ObjectIdentifier::new(ObjectType::Device, device_id);
         let property_ref = PropertyReference::new(PropertyIdentifier::ObjectList); // Object_List property
         let read_spec = ReadAccessSpecification::new(device_object, vec![property_ref]);
@@ -144,7 +169,7 @@ impl BacnetClient {
         &self,
         target_addr: SocketAddr,
         objects: &[ObjectIdentifier],
-    ) -> Result<Vec<ObjectInfo>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<ObjectInfo>, ClientError> {
         let mut objects_info = Vec::new();
         let batch_size = 5;
 
@@ -275,7 +300,7 @@ impl BacnetClient {
         invoke_id: u8,
         service_choice: ConfirmedServiceChoice,
         service_data: &[u8],
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<u8>, ClientError> {
         let apdu = Apdu::ConfirmedRequest {
             segmented: false,
             more_follows: false,
@@ -327,7 +352,7 @@ impl BacnetClient {
             }
         }
 
-        Err("Request timeout".into())
+        Err(ClientError::Timeout)
     }
 
     /// Parse I-Am response
@@ -412,7 +437,7 @@ impl BacnetClient {
     fn encode_rpm_request(
         &self,
         request: &ReadPropertyMultipleRequest,
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<u8>, ClientError> {
         let mut buffer = Vec::new();
 
         request.encode(&mut buffer)?;
@@ -424,7 +449,7 @@ impl BacnetClient {
     fn parse_object_list_response(
         &self,
         data: &[u8],
-    ) -> Result<Vec<ObjectIdentifier>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<ObjectIdentifier>, ClientError> {
         let mut objects = Vec::new();
         let mut pos = 0;
 
@@ -455,7 +480,7 @@ impl BacnetClient {
         &self,
         data: &[u8],
         objects: &[ObjectIdentifier],
-    ) -> Result<Vec<ObjectInfo>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<ObjectInfo>, ClientError> {
         let mut objects_info = Vec::new();
 
         // Simple implementation - create ObjectInfo for each requested object
