@@ -10,9 +10,12 @@
 
 mod config;
 mod error;
+mod transaction;
 
 pub use config::{ClientBuilder, ClientConfig, DEFAULT_HOST, DEFAULT_TIMEOUT};
 pub use error::ClientError;
+
+use transaction::InvokeIdAllocator;
 
 #[cfg(feature = "std")]
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
@@ -42,6 +45,8 @@ pub struct BacnetClient {
     /// the request paths; not yet applied by the existing methods).
     #[allow(dead_code)]
     retries: u8,
+    /// Allocates invoke IDs for confirmed-request transactions.
+    invoke_ids: InvokeIdAllocator,
 }
 
 /// Discovered BACnet device information
@@ -86,6 +91,7 @@ impl BacnetClient {
             socket,
             timeout: DEFAULT_TIMEOUT,
             retries: 0,
+            invoke_ids: InvokeIdAllocator::new(),
         })
     }
 
@@ -114,6 +120,7 @@ impl BacnetClient {
             socket,
             timeout: config.timeout,
             retries: config.retries,
+            invoke_ids: InvokeIdAllocator::new(),
         })
     }
 
@@ -163,10 +170,8 @@ impl BacnetClient {
         let read_spec = ReadAccessSpecification::new(device_object, vec![property_ref]);
         let rpm_request = ReadPropertyMultipleRequest::new(vec![read_spec]);
 
-        let invoke_id = 1;
         let response_data = self.send_confirmed_request(
             target_addr,
-            invoke_id,
             ConfirmedServiceChoice::ReadPropertyMultiple,
             &self.encode_rpm_request(&rpm_request)?,
         )?;
@@ -183,7 +188,7 @@ impl BacnetClient {
         let mut objects_info = Vec::new();
         let batch_size = 5;
 
-        for (batch_idx, chunk) in objects.chunks(batch_size).enumerate() {
+        for chunk in objects.chunks(batch_size) {
             let mut read_specs = Vec::new();
 
             for obj in chunk {
@@ -226,11 +231,9 @@ impl BacnetClient {
             }
 
             let rpm_request = ReadPropertyMultipleRequest::new(read_specs);
-            let invoke_id = (batch_idx + 2) as u8;
 
             match self.send_confirmed_request(
                 target_addr,
-                invoke_id,
                 ConfirmedServiceChoice::ReadPropertyMultiple,
                 &self.encode_rpm_request(&rpm_request)?,
             ) {
@@ -303,14 +306,19 @@ impl BacnetClient {
         bvlc_message
     }
 
-    /// Send a confirmed request and wait for response
+    /// Send a confirmed request and wait for the matching response.
+    ///
+    /// A fresh invoke ID is allocated for the transaction. Returns the
+    /// ComplexAck service data on success, an empty `Vec` for a SimpleAck, or a
+    /// typed [`ClientError`] if the device responds with Error/Reject/Abort or
+    /// the request times out.
     fn send_confirmed_request(
         &self,
         target_addr: SocketAddr,
-        invoke_id: u8,
         service_choice: ConfirmedServiceChoice,
         service_data: &[u8],
     ) -> Result<Vec<u8>, ClientError> {
+        let invoke_id = self.invoke_ids.next_id();
         let apdu = Apdu::ConfirmedRequest {
             segmented: false,
             more_follows: false,
@@ -350,8 +358,10 @@ impl BacnetClient {
             match self.socket.recv_from(&mut recv_buffer) {
                 Ok((len, source)) => {
                     if source == target_addr {
+                        // A matching Error/Reject/Abort surfaces as Err here; an
+                        // unrelated frame yields None so we keep waiting.
                         if let Some(response_data) =
-                            self.process_confirmed_response(&recv_buffer[..len], invoke_id)
+                            self.interpret_confirmed_response(&recv_buffer[..len], invoke_id)?
                         {
                             return Ok(response_data);
                         }
@@ -408,38 +418,70 @@ impl BacnetClient {
         }
     }
 
-    /// Process confirmed response
-    fn process_confirmed_response(&self, data: &[u8], expected_invoke_id: u8) -> Option<Vec<u8>> {
+    /// Interpret a received datalink frame as a response to `expected_invoke_id`.
+    ///
+    /// Returns:
+    /// - `Ok(Some(data))` for the matching ComplexAck (service data) or
+    ///   SimpleAck (empty),
+    /// - `Err(..)` when the device returned a matching Error / Reject / Abort,
+    /// - `Ok(None)` when the frame is unrelated (wrong invoke ID, not a
+    ///   response, or unparseable) and the caller should keep waiting.
+    fn interpret_confirmed_response(
+        &self,
+        data: &[u8],
+        expected_invoke_id: u8,
+    ) -> Result<Option<Vec<u8>>, ClientError> {
         // Check BVLC header
         if data.len() < 4 || data[0] != 0x81 {
-            return None;
+            return Ok(None);
         }
 
         let bvlc_length = ((data[2] as u16) << 8) | (data[3] as u16);
         if data.len() != bvlc_length as usize {
-            return None;
+            return Ok(None);
         }
 
-        // Decode NPDU and APDU
+        // Decode NPDU and APDU; a frame we can't parse is simply not our reply.
         let npdu_start = 4;
-        let (_npdu, npdu_len) = Npdu::decode(&data[npdu_start..]).ok()?;
+        let (_npdu, npdu_len) = match Npdu::decode(&data[npdu_start..]) {
+            Ok(decoded) => decoded,
+            Err(_) => return Ok(None),
+        };
 
         let apdu_start = npdu_start + npdu_len;
-        let apdu = Apdu::decode(&data[apdu_start..]).ok()?;
+        let apdu = match Apdu::decode(&data[apdu_start..]) {
+            Ok(apdu) => apdu,
+            Err(_) => return Ok(None),
+        };
 
         match apdu {
             Apdu::ComplexAck {
                 invoke_id,
                 service_data,
                 ..
-            } => {
-                if invoke_id == expected_invoke_id {
-                    Some(service_data)
-                } else {
-                    None
-                }
+            } if invoke_id == expected_invoke_id => Ok(Some(service_data)),
+            Apdu::SimpleAck { invoke_id, .. } if invoke_id == expected_invoke_id => {
+                Ok(Some(Vec::new()))
             }
-            _ => None,
+            Apdu::Error {
+                invoke_id,
+                error_class,
+                error_code,
+                ..
+            } if invoke_id == expected_invoke_id => Err(ClientError::PropertyError {
+                class: error_class as u32,
+                code: error_code as u32,
+            }),
+            Apdu::Reject {
+                invoke_id,
+                reject_reason,
+            } if invoke_id == expected_invoke_id => Err(ClientError::Rejected(reject_reason)),
+            Apdu::Abort {
+                invoke_id,
+                abort_reason,
+                ..
+            } if invoke_id == expected_invoke_id => Err(ClientError::Abort(abort_reason)),
+            _ => Ok(None),
         }
     }
 
