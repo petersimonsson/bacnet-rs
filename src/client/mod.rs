@@ -29,13 +29,21 @@ use crate::{
     app::{Apdu, MaxApduSize, MaxSegments},
     network::Npdu,
     object::{EngineeringUnits, ObjectIdentifier, ObjectType, PropertyIdentifier, Segmentation},
-    property::PropertyValue,
+    property::{encode_property_value, PropertyValue},
     service::{
         ConfirmedServiceChoice, IAmRequest, PropertyReference, PropertyResultValue,
         ReadAccessResult, ReadAccessSpecification, ReadPropertyMultipleRequest,
-        ReadPropertyMultipleResponse, UnconfirmedServiceChoice, WhoIsRequest,
+        ReadPropertyMultipleResponse, ReadPropertyRequest, ReadPropertyResponse,
+        UnconfirmedServiceChoice, WhoIsRequest, WritePropertyRequest,
     },
 };
+
+/// BVLC function code: Original-Unicast-NPDU.
+const BVLC_ORIGINAL_UNICAST: u8 = 0x0A;
+/// BVLC function code: Original-Broadcast-NPDU (local subnet broadcast).
+const BVLC_ORIGINAL_BROADCAST: u8 = 0x0B;
+/// Default BACnet/IP UDP port (0xBAC0).
+const BACNET_IP_PORT: u16 = 47808;
 
 /// High-level BACnet client for device communication
 #[cfg(feature = "std")]
@@ -158,6 +166,76 @@ impl BacnetClient {
         }
 
         Err(ClientError::Timeout)
+    }
+
+    /// Broadcast a Who-Is on the local subnet and collect every device that
+    /// answers with an I-Am, until the configured timeout elapses.
+    ///
+    /// `low_limit` and `high_limit` bound the device-instance range; pass both
+    /// to target a range, or `None`/`None` to ask every device. Results are
+    /// de-duplicated by device id.
+    ///
+    /// Unlike [`discover_device`](Self::discover_device) (which unicasts to a
+    /// single known address), this reaches all devices on the local network.
+    pub fn who_is(
+        &self,
+        low_limit: Option<u32>,
+        high_limit: Option<u32>,
+    ) -> Result<Vec<DeviceInfo>, ClientError> {
+        let broadcast = SocketAddr::from(([255, 255, 255, 255], BACNET_IP_PORT));
+        self.who_is_to(broadcast, low_limit, high_limit)
+    }
+
+    /// Send a Who-Is to a specific address (broadcast or unicast) and collect
+    /// all I-Am replies until the timeout elapses.
+    ///
+    /// This is the explicit-target form of [`who_is`](Self::who_is); use it for
+    /// subnet-directed broadcasts (e.g. `192.168.1.255:47808`) or to query a
+    /// BBMD/foreign-device peer directly.
+    pub fn who_is_to(
+        &self,
+        target_addr: SocketAddr,
+        low_limit: Option<u32>,
+        high_limit: Option<u32>,
+    ) -> Result<Vec<DeviceInfo>, ClientError> {
+        // Enable broadcast so sends to a broadcast address are permitted.
+        self.socket.set_broadcast(true)?;
+
+        let whois = match (low_limit, high_limit) {
+            (Some(low), Some(high)) => WhoIsRequest::for_range(low, high),
+            _ => WhoIsRequest::new(),
+        };
+        let mut buffer = Vec::new();
+        whois.encode(&mut buffer)?;
+
+        let message = self.create_unconfirmed_bvlc(
+            UnconfirmedServiceChoice::WhoIs as u8,
+            &buffer,
+            BVLC_ORIGINAL_BROADCAST,
+        );
+        self.socket.send_to(&message, target_addr)?;
+
+        // Collect every distinct device that replies before the timeout.
+        let mut devices = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut recv_buffer = [0u8; 1500];
+        let start_time = Instant::now();
+
+        while start_time.elapsed() < self.timeout {
+            match self.socket.recv_from(&mut recv_buffer) {
+                Ok((len, source)) => {
+                    if let Some(info) = self.parse_iam_response(&recv_buffer[..len], source) {
+                        if seen.insert(info.device_id) {
+                            devices.push(info);
+                        }
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(e) => return Err(e.into()),
+            }
+        }
+
+        Ok(devices)
     }
 
     /// Read the device's object list
@@ -332,8 +410,87 @@ impl BacnetClient {
         Ok(objects_info)
     }
 
+    /// Read a single property of an object and return its decoded value.
+    ///
+    /// For a property whose value is an array or list, the first element is
+    /// returned. Returns [`ClientError::PropertyError`] if the device reports
+    /// the property as unknown, or [`ClientError::Timeout`] if there is no
+    /// response.
+    pub fn read_property(
+        &self,
+        target_addr: SocketAddr,
+        object: ObjectIdentifier,
+        property: PropertyIdentifier,
+    ) -> Result<PropertyValue, ClientError> {
+        let request = ReadPropertyRequest::new(object, property);
+        let mut service_data = Vec::new();
+        request.encode(&mut service_data)?;
+
+        let response_data = self.send_confirmed_request(
+            target_addr,
+            ConfirmedServiceChoice::ReadProperty,
+            &service_data,
+        )?;
+
+        let response = ReadPropertyResponse::decode(&response_data)?;
+        response
+            .property_values
+            .into_iter()
+            .next()
+            .ok_or_else(|| ClientError::Decode("ReadProperty response contained no value".into()))
+    }
+
+    /// Write a single property of an object.
+    ///
+    /// `priority` is the BACnet command priority (1-16) for commandable
+    /// properties such as Present_Value; pass `None` to omit it. A successful
+    /// write is acknowledged with a SimpleAck; a device-side failure surfaces as
+    /// [`ClientError::PropertyError`] / [`ClientError::Rejected`] /
+    /// [`ClientError::Abort`].
+    pub fn write_property(
+        &self,
+        target_addr: SocketAddr,
+        object: ObjectIdentifier,
+        property: PropertyIdentifier,
+        value: &PropertyValue,
+        priority: Option<u8>,
+    ) -> Result<(), ClientError> {
+        let mut encoded_value = Vec::new();
+        encode_property_value(value, &mut encoded_value)?;
+
+        let property_id: u32 = property.into();
+        let request = match priority {
+            Some(p) => WritePropertyRequest::with_priority(object, property_id, encoded_value, p),
+            None => WritePropertyRequest::new(object, property_id, encoded_value),
+        };
+
+        let mut service_data = Vec::new();
+        request.encode(&mut service_data)?;
+
+        // A successful WriteProperty is a SimpleAck (empty service data); any
+        // Error/Reject/Abort is surfaced as a typed error by the request path.
+        self.send_confirmed_request(
+            target_addr,
+            ConfirmedServiceChoice::WriteProperty,
+            &service_data,
+        )?;
+
+        Ok(())
+    }
+
     /// Create an unconfirmed message
     fn create_unconfirmed_message(&self, service_choice: u8, service_data: &[u8]) -> Vec<u8> {
+        self.create_unconfirmed_bvlc(service_choice, service_data, BVLC_ORIGINAL_UNICAST)
+    }
+
+    /// Build a BACnet/IP frame for an unconfirmed request, wrapped with the
+    /// given BVLC function (`0x0A` unicast or `0x0B` broadcast).
+    fn create_unconfirmed_bvlc(
+        &self,
+        service_choice: u8,
+        service_data: &[u8],
+        bvlc_function: u8,
+    ) -> Vec<u8> {
         // Create NPDU
         let mut npdu = Npdu::new();
         npdu.control.expecting_reply = false;
@@ -349,8 +506,8 @@ impl BacnetClient {
         let mut message = npdu_buffer;
         message.extend_from_slice(&apdu);
 
-        // Wrap in BVLC header for BACnet/IP (unicast)
-        let mut bvlc_message = vec![0x81, 0x0A, 0x00, 0x00];
+        // Wrap in BVLC header for BACnet/IP
+        let mut bvlc_message = vec![0x81, bvlc_function, 0x00, 0x00];
         bvlc_message.extend_from_slice(&message);
 
         // Update BVLC length
