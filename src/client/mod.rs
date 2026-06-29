@@ -453,9 +453,10 @@ impl BacnetClient {
         Ok(objects_info)
     }
 
-    /// Read a single property of an object and return its decoded value.
+    /// Read a property of an object and return all decoded values.
     ///
-    /// For a property whose value is an array or list, the first element is
+    /// Most properties decode to a single value; arrays and lists (e.g.
+    /// `Object_List`, `Priority_Array`) decode to several, so the full set is
     /// returned. Returns [`ClientError::PropertyError`] if the device reports
     /// the property as unknown, or [`ClientError::Timeout`] if there is no
     /// response.
@@ -464,7 +465,7 @@ impl BacnetClient {
         target_addr: SocketAddr,
         object: ObjectIdentifier,
         property: PropertyIdentifier,
-    ) -> Result<PropertyValue, ClientError> {
+    ) -> Result<Vec<PropertyValue>, ClientError> {
         let request = ReadPropertyRequest::new(object, property);
         let mut service_data = Vec::new();
         request.encode(&mut service_data)?;
@@ -475,12 +476,7 @@ impl BacnetClient {
             &service_data,
         )?;
 
-        let response = ReadPropertyResponse::decode(&response_data)?;
-        response
-            .property_values
-            .into_iter()
-            .next()
-            .ok_or_else(|| ClientError::Decode("ReadProperty response contained no value".into()))
+        Ok(ReadPropertyResponse::decode(&response_data)?.property_values)
     }
 
     /// Write a single property of an object.
@@ -553,19 +549,20 @@ impl BacnetClient {
 
         self.write_property(target_addr, object, property, value, priority)?;
 
-        let mut read_back = self.read_property(target_addr, object, property)?;
-        let mut attempts = 1;
-        while !values_equivalent(value, &read_back) && attempts < VERIFY_ATTEMPTS {
-            std::thread::sleep(VERIFY_DELAY);
+        let mut read_back = Vec::new();
+        for attempt in 0..VERIFY_ATTEMPTS {
+            if attempt > 0 {
+                std::thread::sleep(VERIFY_DELAY);
+            }
             read_back = self.read_property(target_addr, object, property)?;
-            attempts += 1;
+            if read_back.iter().any(|v| values_equivalent(value, v)) {
+                return Ok(WriteOutcome::Verified);
+            }
         }
 
-        if values_equivalent(value, &read_back) {
-            Ok(WriteOutcome::Verified)
-        } else {
-            Ok(WriteOutcome::NotEffective { read_back })
-        }
+        // Not verified: report the value the property actually holds.
+        let read_back = read_back.into_iter().next().unwrap_or(PropertyValue::Null);
+        Ok(WriteOutcome::NotEffective { read_back })
     }
 
     /// Create an unconfirmed message

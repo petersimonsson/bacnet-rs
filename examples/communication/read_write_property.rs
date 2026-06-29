@@ -74,7 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Always show the current value first.
     print!("{} {} Present_Value (read): ", object_type, instance);
     match client.read_property(target_addr, object, PropertyIdentifier::PresentValue) {
-        Ok(value) => println!("{}", value.as_display_string()),
+        Ok(values) => println!("{}", show_values(&values)),
         Err(e) => println!("<read failed: {e}>"),
     }
 
@@ -142,7 +142,7 @@ fn relinquish(
             let pv = client.read_property(target_addr, object, PropertyIdentifier::PresentValue)?;
             println!(
                 "  Relinquished. Present_Value now reads {}.",
-                pv.as_display_string()
+                show_values(&pv)
             );
         }
         Err(e) => println!("  Relinquish REFUSED by device: {e}"),
@@ -164,7 +164,7 @@ fn discover_and_read_first(
     );
 
     let name = client.read_property(target_addr, device_object, PropertyIdentifier::ObjectName)?;
-    println!("Device Object_Name: {}", name.as_display_string());
+    println!("Device Object_Name: {}", show_values(&name));
 
     let objects = client.read_object_list(target_addr, device.device_id)?;
     let Some(point) = objects
@@ -180,8 +180,21 @@ fn discover_and_read_first(
         point.object_type, point.instance
     );
     let value = client.read_property(target_addr, point, PropertyIdentifier::PresentValue)?;
-    println!("  Present_Value (read): {}", value.as_display_string());
+    println!("  Present_Value (read): {}", show_values(&value));
     Ok(())
+}
+
+/// Render the values from a `read_property` result for display: a lone value as
+/// itself, multiple values as a bracketed, comma-separated list.
+fn show_values(values: &[PropertyValue]) -> String {
+    match values {
+        [] => "(no value)".to_string(),
+        [single] => single.as_display_string(),
+        many => {
+            let parts: Vec<String> = many.iter().map(|v| v.as_display_string()).collect();
+            format!("[{}]", parts.join(", "))
+        }
+    }
 }
 
 /// Parse a bare IP (defaulting to port 47808) or a full `ip:port`.

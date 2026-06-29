@@ -149,11 +149,11 @@ fn read_property_decodes_complex_ack() {
         }
     });
 
-    let value = test_client()
+    let values = test_client()
         .read_property(addr, object, PropertyIdentifier::PresentValue)
         .expect("read should succeed");
 
-    assert_eq!(value, PropertyValue::Real(72.5));
+    assert_eq!(values, vec![PropertyValue::Real(72.5)]);
 }
 
 #[test]
