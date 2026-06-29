@@ -13,6 +13,9 @@
 //!   # write Present_Value, then read it back (priority defaults to 8; "none" omits it)
 //!   read_write_property <ip[:port]> <object_type> <instance> <real-value> [priority|none]
 //!
+//!   # relinquish a commanded slot (write Null at the given priority)
+//!   read_write_property <ip[:port]> <object_type> <instance> relinquish [priority]
+//!
 //! <object_type> accepts names or short forms: analogValue/av, analogInput/ai,
 //! analogOutput/ao, binaryValue/bv, binaryInput/bi, binaryOutput/bo,
 //! multiStateValue/msv, multiStateInput/msi, multiStateOutput/mso.
@@ -74,15 +77,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => println!("<read failed: {e}>"),
     }
 
-    // If a value was supplied, write it and read it back.
+    // If a value was supplied, write it (or relinquish) and confirm.
     if let Some(value_arg) = args.get(4) {
-        let value: f32 = value_arg.parse()?;
         let priority = match args.get(5).map(|s| s.to_ascii_lowercase()) {
             None => Some(8),
             Some(s) if s == "none" => None,
             Some(s) => Some(s.parse()?),
         };
 
+        // "relinquish" / "null" releases the slot by writing Null at that priority.
+        if value_arg.eq_ignore_ascii_case("relinquish") || value_arg.eq_ignore_ascii_case("null") {
+            return relinquish(&client, target_addr, object, priority);
+        }
+
+        let value: f32 = value_arg.parse()?;
         println!("Writing Present_Value = {value} (priority {priority:?})...");
         // write_property_verified writes, then reads back to confirm the value
         // actually took effect — a SimpleAck alone does not guarantee that.
@@ -110,6 +118,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    Ok(())
+}
+
+/// Relinquish a commanded value by writing `Null` at the given priority, then
+/// read back the resulting effective value.
+fn relinquish(
+    client: &BacnetClient,
+    target_addr: SocketAddr,
+    object: ObjectIdentifier,
+    priority: Option<u8>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Relinquishing Present_Value at priority {priority:?} (writing Null)...");
+    match client.write_property(
+        target_addr,
+        object,
+        PropertyIdentifier::PresentValue,
+        &PropertyValue::Null,
+        priority,
+    ) {
+        Ok(()) => {
+            let pv = client.read_property(target_addr, object, PropertyIdentifier::PresentValue)?;
+            println!(
+                "  Relinquished. Present_Value now reads {}.",
+                pv.as_display_string()
+            );
+        }
+        Err(e) => println!("  Relinquish REFUSED by device: {e}"),
+    }
     Ok(())
 }
 
