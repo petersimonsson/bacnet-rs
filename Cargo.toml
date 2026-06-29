@@ -121,6 +121,11 @@ name = "test_client"
 path = "examples/communication/test_client.rs"
 required-features = ["std"]
 
+[[example]]
+name = "read_write_property"
+path = "examples/communication/read_write_property.rs"
+required-features = ["std"]
+
 # Utility examples
 [[example]]
 name = "util_demo"
