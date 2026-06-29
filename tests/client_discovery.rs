@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use bacnet_rs::{
     client::BacnetClient,
+    datalink::bip::{BvlcFunction, BvlcHeader},
     network::Npdu,
     object::{ObjectIdentifier, ObjectType, Segmentation},
     service::{IAmRequest, UnconfirmedServiceChoice},
@@ -41,12 +42,10 @@ fn build_iam_frame() -> Vec<u8> {
     message.push(UnconfirmedServiceChoice::IAm as u8);
     message.extend_from_slice(&iam_buffer);
 
-    // BVLC: Original-Unicast-NPDU (0x0A)
-    let mut frame = vec![0x81, 0x0A, 0x00, 0x00];
+    // Wrap in a BVLC Original-Unicast-NPDU header (length includes the 4-byte header).
+    let header = BvlcHeader::new(BvlcFunction::OriginalUnicastNpdu, 4 + message.len() as u16);
+    let mut frame = header.encode();
     frame.extend_from_slice(&message);
-    let len = frame.len() as u16;
-    frame[2] = (len >> 8) as u8;
-    frame[3] = (len & 0xFF) as u8;
     frame
 }
 
