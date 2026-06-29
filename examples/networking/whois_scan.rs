@@ -8,8 +8,7 @@
 //! broadcast addresses are also tried (unreachable ones are skipped). Replies
 //! are de-duplicated by device id.
 //!
-//! For a low-level version that drives the data-link layer directly (and a
-//! router-aware scan), see `comprehensive_whois_scan`.
+//! For a router-aware discovery example, see `routed_device_discovery`.
 
 use bacnet_rs::client::{BacnetClient, DeviceInfo};
 use std::collections::BTreeMap;

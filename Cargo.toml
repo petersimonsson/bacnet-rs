@@ -64,16 +64,6 @@ no-std = []
 
 # Basic examples
 [[example]]
-name = "simple_device"
-path = "examples/basic/simple_device.rs"
-required-features = ["std"]
-
-[[example]]
-name = "advanced_device"
-path = "examples/basic/advanced_device.rs"
-required-features = ["std"]
-
-[[example]]
 name = "responder_device"
 path = "examples/basic/responder_device.rs"
 required-features = ["std"]
@@ -87,21 +77,6 @@ required-features = ["std"]
 [[example]]
 name = "routed_device_discovery"
 path = "examples/networking/routed_device_discovery.rs"
-required-features = ["std"]
-
-[[example]]
-name = "comprehensive_whois_scan"
-path = "examples/networking/comprehensive_whois_scan.rs"
-required-features = ["std"]
-
-[[example]]
-name = "transport_demo"
-path = "examples/networking/transport_demo.rs"
-required-features = ["std"]
-
-[[example]]
-name = "timeout_demo"
-path = "examples/networking/timeout_demo.rs"
 required-features = ["std"]
 
 # Object examples

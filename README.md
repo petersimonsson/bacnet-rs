@@ -13,29 +13,29 @@ desktop applications.
 
 ## Implementation Status
 
-| Component                  | Status          | Notes                                                   |
-|----------------------------|-----------------|---------------------------------------------------------|
-| **Encoding/Decoding**      | Working         | ASN.1 application and context tags, all primitive types |
-| **BACnet/IP (Annex J)**    | Working         | BVLC, BBMD, Foreign Device registration                 |
-| **MS/TP (Clause 9)**       | Working         | Frame encoding, CRC, token-passing                      |
-| **Ethernet (Clause 7)**    | Working         | 802.3 frames, LLC headers                               |
-| **Who-Is / I-Am**          | Working         | Device discovery                                        |
-| **Read Property**          | Working         | Single property read                                    |
-| **Read Property Multiple** | Working         | Batch property reads                                    |
-| **Write Property**         | Working         | Single property write                                   |
-| **Subscribe COV**          | Working         | Change-of-value subscriptions                           |
-| **Atomic File Read/Write** | Working         | Stream and record access                                |
-| **Time Synchronization**   | Working         | Standard and UTC                                        |
-| **Analog Objects**         | Working         | Input, Output, Value with priority arrays               |
-| **Binary Objects**         | Working         | Input, Output, Value with priority arrays               |
-| **Multistate Objects**     | Working         | Input, Output, Value                                    |
-| **File / Device Objects**  | Working         | Basic property support                                  |
-| **Client API**             | Partial         | Discovery and read-only via BACnet/IP only              |
-| **Segmentation**           | Not implemented | Large message segmentation/reassembly                   |
-| **Alarm & Event**          | Not implemented | Intrinsic and algorithmic reporting                     |
-| **Trending**               | Not implemented | Trend log objects                                       |
-| **Scheduling**             | Not implemented | Schedule and calendar objects                           |
-| **BACnet/SC (Annex AB)**   | Not implemented | Secure Connect                                          |
+| Component                  | Status          | Notes                                                                            |
+|----------------------------|-----------------|----------------------------------------------------------------------------------|
+| **Encoding/Decoding**      | Working         | ASN.1 application and context tags, all primitive types                          |
+| **BACnet/IP (Annex J)**    | Working         | BVLC, BBMD, Foreign Device registration                                          |
+| **MS/TP (Clause 9)**       | Working         | Frame encoding, CRC, token-passing                                               |
+| **Ethernet (Clause 7)**    | Working         | 802.3 frames, LLC headers                                                        |
+| **Who-Is / I-Am**          | Working         | Device discovery                                                                 |
+| **Read Property**          | Working         | Single property read                                                             |
+| **Read Property Multiple** | Working         | Batch property reads                                                             |
+| **Write Property**         | Working         | Single property write                                                            |
+| **Subscribe COV**          | Working         | Change-of-value subscriptions                                                    |
+| **Atomic File Read/Write** | Working         | Stream and record access                                                         |
+| **Time Synchronization**   | Working         | Standard and UTC                                                                 |
+| **Analog Objects**         | Working         | Input, Output, Value with priority arrays                                        |
+| **Binary Objects**         | Working         | Input, Output, Value with priority arrays                                        |
+| **Multistate Objects**     | Working         | Input, Output, Value                                                             |
+| **File / Device Objects**  | Working         | Basic property support                                                           |
+| **Client API**             | Working         | Discovery, broadcast Who-Is, read/write & verified write (BACnet/IP, no routing) |
+| **Segmentation**           | Not implemented | Large message segmentation/reassembly                                            |
+| **Alarm & Event**          | Not implemented | Intrinsic and algorithmic reporting                                              |
+| **Trending**               | Not implemented | Trend log objects                                                                |
+| **Scheduling**             | Not implemented | Schedule and calendar objects                                                    |
+| **BACnet/SC (Annex AB)**   | Not implemented | Secure Connect                                                                   |
 
 ## Quick Start
 
@@ -67,7 +67,33 @@ The stack is organized into layered modules:
 - **Service** (`src/service/`): BACnet service request/response implementations
 - **Object** (`src/object/`): Standard BACnet object types and database
 - **Application** (`src/app/`): APDU handling and segmentation
-- **Client** (`src/client.rs`): High-level BACnet client API
+- **Client** (`src/client/`): High-level BACnet client API
+
+## Examples
+
+The high-level [`BacnetClient`](src/client/mod.rs) is the recommended entry point
+for talking to devices. The client-focused examples:
+
+```bash
+# Discover every device on the local network (broadcast Who-Is)
+cargo run --example whois_scan
+
+# Discover one device, then read its object list and properties
+cargo run --example test_client 10.161.1.211
+
+# Read a single property
+cargo run --example read_write_property 10.161.1.211 analogValue 4
+
+# Write Present_Value and verify it took effect (priority 8)
+cargo run --example read_write_property 10.161.1.211 analogValue 4 5.0 8
+
+# Relinquish a commanded priority slot (write Null)
+cargo run --example read_write_property 10.161.1.211 analogValue 4 relinquish 8
+```
+
+Lower-level examples (`routed_device_discovery` for network routing, and the
+device-side `responder_device`) drive the data-link or server layers directly for
+cases the client does not cover.
 
 ## Contributing
 
