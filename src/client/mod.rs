@@ -179,7 +179,17 @@ impl BacnetClient {
                         }
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                // A per-recv socket timeout is WouldBlock on Unix and TimedOut
+                // on Windows; both mean "nothing yet", so keep waiting until our
+                // own deadline elapses.
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    continue
+                }
                 Err(e) => return Err(e.into()),
             }
         }
@@ -249,7 +259,17 @@ impl BacnetClient {
                         }
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                // A per-recv socket timeout is WouldBlock on Unix and TimedOut
+                // on Windows; both mean "nothing yet", so keep waiting until our
+                // own deadline elapses.
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    continue
+                }
                 Err(e) => return Err(e.into()),
             }
         }
@@ -649,7 +669,17 @@ impl BacnetClient {
                         }
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                // A per-recv socket timeout is WouldBlock on Unix and TimedOut
+                // on Windows; both mean "nothing yet", so keep waiting until our
+                // own deadline elapses.
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    continue
+                }
                 Err(e) => return Err(e.into()),
             }
         }
