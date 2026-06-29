@@ -26,7 +26,6 @@ if-addrs = { version = "0.13", optional = true }
 
 # Logging
 log = { version = "0.4", default-features = false }
-env_logger = { version = "0.11", optional = true }
 
 # Time handling
 chrono = { version = "0.4", default-features = false, features = ["alloc", "clock"] }
