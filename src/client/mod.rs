@@ -27,6 +27,7 @@ use alloc::{collections::BTreeMap as HashMap, string::String, vec::Vec};
 
 use crate::{
     app::{Apdu, MaxApduSize, MaxSegments},
+    datalink::bip::BACNET_IP_PORT,
     network::Npdu,
     object::{EngineeringUnits, ObjectIdentifier, ObjectType, PropertyIdentifier, Segmentation},
     property::{encode_property_value, PropertyValue},
@@ -42,8 +43,6 @@ use crate::{
 const BVLC_ORIGINAL_UNICAST: u8 = 0x0A;
 /// BVLC function code: Original-Broadcast-NPDU (local subnet broadcast).
 const BVLC_ORIGINAL_BROADCAST: u8 = 0x0B;
-/// Default BACnet/IP UDP port (0xBAC0).
-const BACNET_IP_PORT: u16 = 47808;
 
 /// High-level BACnet client for device communication
 #[cfg(feature = "std")]
