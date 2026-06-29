@@ -112,17 +112,6 @@ name = "vendor_lookup"
 path = "examples/utilities/vendor_lookup.rs"
 required-features = ["std"]
 
-# Debugging examples
-[[example]]
-name = "debug_properties"
-path = "examples/debugging/debug_properties.rs"
-required-features = ["std"]
-
-[[example]]
-name = "debug_formatter"
-path = "examples/debugging/debug_formatter.rs"
-required-features = ["std"]
-
 [[bench]]
 name = "encoding"
 harness = false
