@@ -97,15 +97,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("  Write VERIFIED: Present_Value is now {value}.");
             }
             Ok(WriteOutcome::NotEffective { read_back }) => {
+                let prio = priority.map_or_else(|| "none".to_string(), |p| p.to_string());
                 println!(
-                    "  Write was ACCEPTED by the device but did NOT take effect: \
-                     Present_Value still reads {}.",
+                    "  NotEffective: SimpleAck @ prio {prio}, PV unchanged ({}) — slot \
+                     overridden by higher priority or non-commandable.",
                     read_back.as_display_string()
-                );
-                println!(
-                    "  Likely a higher-priority command is winning, or the property \
-                     is not commandable at priority {priority:?}. Try a higher priority \
-                     (lower number), e.g. 1."
                 );
             }
             // The typed error tells us exactly why the device refused (e.g.

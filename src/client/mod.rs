@@ -509,6 +509,10 @@ impl BacnetClient {
     ///   commandable at this priority).
     ///
     /// Floating-point values are compared with a small tolerance.
+    ///
+    /// A device commonly returns the SimpleAck *before* `Present_Value` reflects
+    /// the new command (priority-array resolution can lag), so the read-back is
+    /// polled a few times before concluding the write did not take effect.
     pub fn write_property_verified(
         &self,
         target_addr: SocketAddr,
@@ -517,9 +521,22 @@ impl BacnetClient {
         value: &PropertyValue,
         priority: Option<u8>,
     ) -> Result<WriteOutcome, ClientError> {
+        /// How many times to read back before concluding the write didn't take.
+        const VERIFY_ATTEMPTS: u32 = 4;
+        /// Delay between read-back attempts, giving the device time to apply the
+        /// command to `Present_Value`.
+        const VERIFY_DELAY: Duration = Duration::from_millis(150);
+
         self.write_property(target_addr, object, property, value, priority)?;
 
-        let read_back = self.read_property(target_addr, object, property)?;
+        let mut read_back = self.read_property(target_addr, object, property)?;
+        let mut attempts = 1;
+        while !values_equivalent(value, &read_back) && attempts < VERIFY_ATTEMPTS {
+            std::thread::sleep(VERIFY_DELAY);
+            read_back = self.read_property(target_addr, object, property)?;
+            attempts += 1;
+        }
+
         if values_equivalent(value, &read_back) {
             Ok(WriteOutcome::Verified)
         } else {
@@ -896,7 +913,29 @@ mod tests {
     #[test]
     fn test_error_display() {
         assert_eq!(ClientError::Timeout.to_string(), "request timed out");
-        let pe = ClientError::PropertyError { class: 1, code: 31 };
-        assert_eq!(pe.to_string(), "BACnet error (class 1, code 31)");
+
+        // Known class + code are named, with the raw numbers retained.
+        let known = ClientError::PropertyError { class: 1, code: 31 };
+        assert_eq!(
+            known.to_string(),
+            "unknown-object (class object[1], code 31)"
+        );
+
+        // Property/write-access-denied — the case seen against real hardware.
+        let denied = ClientError::PropertyError { class: 2, code: 40 };
+        assert_eq!(
+            denied.to_string(),
+            "write-access-denied (class property[2], code 40)"
+        );
+
+        // Unknown code falls back to the numeric form.
+        let unknown = ClientError::PropertyError {
+            class: 2,
+            code: 222,
+        };
+        assert_eq!(
+            unknown.to_string(),
+            "BACnet error (class property[2], code 222)"
+        );
     }
 }

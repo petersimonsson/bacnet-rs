@@ -76,26 +76,25 @@ where
     addr
 }
 
-/// Like [`spawn_device`] but answers `count` consecutive requests, calling
-/// `make_response` for each (so write-then-read-back flows can be tested).
-fn spawn_device_multi<F>(count: usize, mut make_response: F) -> SocketAddr
+/// Like [`spawn_device`] but answers every confirmed request until the peer
+/// goes idle (1s with no request), calling `make_response` for each. Used for
+/// flows that issue several requests, e.g. write then a polled read-back.
+fn spawn_device_loop<F>(mut make_response: F) -> SocketAddr
 where
     F: FnMut(u8, ConfirmedServiceChoice) -> Apdu + Send + 'static,
 {
     let socket = UdpSocket::bind("127.0.0.1:0").expect("bind device");
     socket
-        .set_read_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(Duration::from_secs(1)))
         .unwrap();
     let addr = socket.local_addr().unwrap();
 
     thread::spawn(move || {
         let mut buf = [0u8; 1500];
-        for _ in 0..count {
-            if let Ok((len, src)) = socket.recv_from(&mut buf) {
-                let (invoke_id, service_choice) = parse_confirmed_request(&buf[..len]);
-                let frame = wrap_response(make_response(invoke_id, service_choice));
-                socket.send_to(&frame, src).expect("send response");
-            }
+        while let Ok((len, src)) = socket.recv_from(&mut buf) {
+            let (invoke_id, service_choice) = parse_confirmed_request(&buf[..len]);
+            let frame = wrap_response(make_response(invoke_id, service_choice));
+            socket.send_to(&frame, src).expect("send response");
         }
     });
 
@@ -205,7 +204,7 @@ fn write_property_verified_confirms_when_readback_matches() {
 
     // Two requests: WriteProperty -> SimpleAck, then ReadProperty -> the value
     // we just wrote, so the verify succeeds.
-    let addr = spawn_device_multi(2, move |invoke_id, service_choice| match service_choice {
+    let addr = spawn_device_loop(move |invoke_id, service_choice| match service_choice {
         ConfirmedServiceChoice::WriteProperty => Apdu::SimpleAck {
             invoke_id,
             service_choice: ConfirmedServiceChoice::WriteProperty as u8,
@@ -235,7 +234,7 @@ fn write_property_verified_reports_not_effective_when_overridden() {
 
     // Device accepts the write (SimpleAck) but the read-back still reports the
     // old value 2.0 — e.g. a higher-priority slot is winning.
-    let addr = spawn_device_multi(2, move |invoke_id, service_choice| match service_choice {
+    let addr = spawn_device_loop(move |invoke_id, service_choice| match service_choice {
         ConfirmedServiceChoice::WriteProperty => Apdu::SimpleAck {
             invoke_id,
             service_choice: ConfirmedServiceChoice::WriteProperty as u8,
