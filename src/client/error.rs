@@ -6,7 +6,7 @@
 //! rejects/aborts, per-property errors, etc.) instead of inspecting strings.
 
 use crate::encoding::EncodingError;
-use crate::service::RejectReason;
+use crate::service::{AbortReason, RejectReason};
 use thiserror::Error;
 
 /// Errors that can occur while using the high-level [`BacnetClient`](super::BacnetClient).
@@ -37,10 +37,9 @@ pub enum ClientError {
     #[error("request rejected: {0}")]
     Rejected(RejectReason),
 
-    /// The remote device aborted the transaction. Carries the raw BACnet abort
-    /// reason code (see `AbortReason` for the standard values).
-    #[error("transaction aborted (reason {0})")]
-    Abort(u8),
+    /// The remote device aborted the transaction.
+    #[error("transaction aborted: {0}")]
+    Abort(AbortReason),
 
     /// The device returned a BACnet `Error` PDU (or a per-property error inside
     /// a ReadPropertyMultiple result), identified by its error class and code.

@@ -33,7 +33,7 @@ use crate::{
     object::{EngineeringUnits, ObjectIdentifier, ObjectType, PropertyIdentifier, Segmentation},
     property::{encode_property_value, PropertyValue},
     service::{
-        ConfirmedServiceChoice, IAmRequest, PropertyReference, PropertyResultValue,
+        AbortReason, ConfirmedServiceChoice, IAmRequest, PropertyReference, PropertyResultValue,
         ReadAccessResult, ReadAccessSpecification, ReadPropertyMultipleRequest,
         ReadPropertyMultipleResponse, ReadPropertyRequest, ReadPropertyResponse,
         UnconfirmedServiceChoice, WhoIsRequest, WritePropertyRequest,
@@ -762,7 +762,9 @@ impl BacnetClient {
                 invoke_id,
                 abort_reason,
                 ..
-            } if invoke_id == expected_invoke_id => Err(ClientError::Abort(abort_reason)),
+            } if invoke_id == expected_invoke_id => {
+                Err(ClientError::Abort(AbortReason::from(abort_reason)))
+            }
             _ => Ok(None),
         }
     }
