@@ -735,6 +735,14 @@ impl BacnetClient {
     /// - `Err(..)` when the device returned a matching Error / Reject / Abort,
     /// - `Ok(None)` when the frame is unrelated (wrong invoke ID, not a
     ///   response, or unparseable) and the caller should keep waiting.
+    ///
+    /// `Ok(None)` (rather than an error) is deliberate: this is called from a
+    /// per-request receive loop with a single transaction in flight, so frames
+    /// that don't match are simply other traffic on the socket and must be
+    /// skipped, not treated as failures. If this ever moves behind a shared
+    /// event loop that demultiplexes all incoming messages, that loop would need
+    /// to dispatch frames to the waiting transaction by invoke ID instead of
+    /// dropping non-matching ones here.
     fn interpret_confirmed_response(
         &self,
         data: &[u8],
