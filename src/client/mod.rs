@@ -80,6 +80,25 @@ pub struct ObjectInfo {
     pub status_flags: Option<Vec<bool>>,
 }
 
+/// Result of a verified write (see [`BacnetClient::write_property_verified`]).
+///
+/// A BACnet `SimpleAck` only confirms the device *accepted* the WriteProperty
+/// request — not that the value became effective. For commandable objects the
+/// `Present_Value` is resolved from the priority array, so an accepted write can
+/// still be overridden by a higher-priority slot (or the property may not be
+/// commandable at the chosen priority). This type makes that difference visible.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WriteOutcome {
+    /// The device acknowledged the write and a read-back confirms the value.
+    Verified,
+    /// The device acknowledged the write, but reading the property back shows a
+    /// different value — the write did not take effect.
+    NotEffective {
+        /// The value the property actually holds after the write.
+        read_back: PropertyValue,
+    },
+}
+
 #[cfg(feature = "std")]
 impl BacnetClient {
     /// Create a new BACnet client with default configuration.
@@ -478,6 +497,36 @@ impl BacnetClient {
         Ok(())
     }
 
+    /// Write a property and then read it back to confirm it took effect.
+    ///
+    /// This is the safe way to command a value: it returns
+    /// - `Err(..)` if the device *refused* the write (Error/Reject/Abort) or a
+    ///   transfer failed;
+    /// - `Ok(WriteOutcome::Verified)` if the read-back matches `value`;
+    /// - `Ok(WriteOutcome::NotEffective { read_back })` if the device
+    ///   acknowledged the write but the property still reports a different value
+    ///   (e.g. a higher-priority command is winning, or the property is not
+    ///   commandable at this priority).
+    ///
+    /// Floating-point values are compared with a small tolerance.
+    pub fn write_property_verified(
+        &self,
+        target_addr: SocketAddr,
+        object: ObjectIdentifier,
+        property: PropertyIdentifier,
+        value: &PropertyValue,
+        priority: Option<u8>,
+    ) -> Result<WriteOutcome, ClientError> {
+        self.write_property(target_addr, object, property, value, priority)?;
+
+        let read_back = self.read_property(target_addr, object, property)?;
+        if values_equivalent(value, &read_back) {
+            Ok(WriteOutcome::Verified)
+        } else {
+            Ok(WriteOutcome::NotEffective { read_back })
+        }
+    }
+
     /// Create an unconfirmed message
     fn create_unconfirmed_message(&self, service_choice: u8, service_data: &[u8]) -> Vec<u8> {
         self.create_unconfirmed_bvlc(service_choice, service_data, BVLC_ORIGINAL_UNICAST)
@@ -760,6 +809,27 @@ impl BacnetClient {
         }
 
         info
+    }
+}
+
+/// Compare a written value against a read-back value when verifying a write,
+/// tolerating floating-point rounding for Real/Double (including a Real written
+/// value read back as a Double, or vice versa).
+#[cfg(feature = "std")]
+fn values_equivalent(written: &PropertyValue, read_back: &PropertyValue) -> bool {
+    const REAL_TOLERANCE: f64 = 1e-3;
+    match (written, read_back) {
+        (PropertyValue::Real(a), PropertyValue::Real(b)) => {
+            (f64::from(*a) - f64::from(*b)).abs() <= REAL_TOLERANCE
+        }
+        (PropertyValue::Double(a), PropertyValue::Double(b)) => (a - b).abs() <= REAL_TOLERANCE,
+        (PropertyValue::Real(a), PropertyValue::Double(b)) => {
+            (f64::from(*a) - b).abs() <= REAL_TOLERANCE
+        }
+        (PropertyValue::Double(a), PropertyValue::Real(b)) => {
+            (a - f64::from(*b)).abs() <= REAL_TOLERANCE
+        }
+        (a, b) => a == b,
     }
 }
 
