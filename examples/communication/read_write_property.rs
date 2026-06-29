@@ -35,7 +35,8 @@ use std::env;
 use std::net::SocketAddr;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().collect();
+    // Example CLI parsing only — not a security boundary.
+    let args: Vec<String> = env::args().collect(); // nosemgrep: rust.lang.security.args.args
     if args.len() < 2 {
         eprintln!(
             "Usage: {} <ip[:port]> [<object_type> <instance> [<value> [priority|none]]]",
