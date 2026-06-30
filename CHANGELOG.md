@@ -2,6 +2,65 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-06-30
+
+This release introduces a synchronous **client API** (`BacnetClient`),
+device discovery plus typed read/write, and resolves a
+security-audit advisory in the dependency tree.
+
+### Added
+
+- **Client API** (`src/client/`):
+  - `BacnetClient` with a builder-based `ClientConfig` (host, port, timeout, retries)
+    and a typed `ClientError` returned from every operation
+  - `who_is()` / `who_is_to(target, low, high)` device discovery returning `Vec<DeviceInfo>`
+  - `read_property()` returning all decoded `PropertyValue`s for the request
+  - `write_property()` with optional priority (1–16) for commandable objects
+  - `write_property_verified()` returning `WriteOutcome` (`Verified` /
+    `NotEffective { read_back }`) confirms a write actually took effect by reading
+    the value back, with a short retry loop to absorb device settling time
+  - `InvokeIdAllocator` for transaction invoke-ID correlation
+  - `timeout()` and `local_addr()` accessors
+- `Client::new_with_local_addr` for binding a specific IPv4/IPv6 address and
+  ephemeral port (replaces `new_with_local_port`)
+- `AbortReason` enumeration (ASHRAE 135 `BACnetAbortReason`) surfaced through
+  `ClientError::Abort`, with `Custom`/`Reserved` handling for vendor/reserved codes
+- Human-readable decoding of BACnet error class/code pairs in client error messages
+- New `read_write_property` example (discover → read → write/verify → relinquish)
+  using the client API
+- Client integration and device-discovery tests (`tests/client_confirmed.rs`,
+  `tests/client_discovery.rs`)
+
+### Changed
+
+- `EngineeringUnits` ordering and documentation aligned with ANSI/ASHRAE
+  Standard 135-2024; `micro-siemens` renamed to `microsiemens`
+- `AbortReason` is now generated via `generate_custom_enum!` (auto `From`/`Display`
+  and `Custom`/`Reserved` variants) instead of a hand-written impl; its `Display`
+  output is now PascalCase, consistent with `RejectReason`
+- `generate_custom_enum!` no longer emits a module-level `use serde::{...}`; it
+  uses fully-qualified paths in its derives so the macro can be invoked more than
+  once per module
+- `BACNET_IP_PORT` moved into the `datalink::bip` module
+- Examples migrated to the high-level client API where applicable; `whois_scan`
+  reworked to use `BacnetClient`
+- Object-identifier scanning now uses `decode_object_identifier` instead of manual
+  byte slicing
+
+### Fixed
+
+- Socket receive loops now treat both `WouldBlock` and `TimedOut` as timeouts,
+  fixing a cross-platform timeout bug on Windows (`WSAETIMEDOUT`)
+- Clippy warnings resolved; conditional logic refactored to `if let` guards
+
+### Removed
+
+- Removed the unused optional `env_logger` dependency, which transitively pulled in
+  the unmaintained `proc-macro-error2` crate (RUSTSEC-2026-0173) via `jiff` → `defmt`
+- Removed the `advanced_device`, `comprehensive_whois_scan`, `debug_formatter`, and
+  `debug_properties` examples and the per-folder example READMEs to streamline the
+  example set
+
 ## [0.3.0] - 2026-04-13
 
 ### Breaking Changes
