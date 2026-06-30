@@ -341,7 +341,7 @@ impl Device {
             vendor_identifier: 999, // Reserved for ASHRAE - appropriate for open-source implementations
             model_name: String::from("Rust BACnet Device"),
             firmware_revision: String::from("1.0.0"),
-            application_software_version: String::from("0.2.1"),
+            application_software_version: String::from(env!("CARGO_PKG_VERSION")),
             protocol_version: 1,
             protocol_revision: 22, // Current BACnet protocol revision
             protocol_services_supported: ProtocolServicesSupported::default(),
