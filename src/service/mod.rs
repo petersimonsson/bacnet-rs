@@ -361,88 +361,26 @@ generate_custom_enum!(
     InvalidDataEncoding = 10,
 }, u8, 64..=255);
 
-/// Abort reason codes (ASHRAE 135 `BACnetAbortReason`).
-///
-/// Unrecognized values (reserved 12-63 and vendor-proprietary 64-255) are kept
-/// as `Unknown(code)` so any abort reason round-trips losslessly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AbortReason {
-    Other,
-    BufferOverflow,
-    InvalidApduInThisState,
-    PreemptedByHigherPriorityTask,
-    SegmentationNotSupported,
-    SecurityError,
-    InsufficientSecurity,
-    WindowSizeOutOfRange,
-    ApplicationExceededReplyTime,
-    OutOfResources,
-    TsmTimeout,
-    ApduTooLong,
-    /// A reserved or vendor-proprietary reason code.
-    Unknown(u8),
-}
-
-impl From<u8> for AbortReason {
-    fn from(code: u8) -> Self {
-        match code {
-            0 => Self::Other,
-            1 => Self::BufferOverflow,
-            2 => Self::InvalidApduInThisState,
-            3 => Self::PreemptedByHigherPriorityTask,
-            4 => Self::SegmentationNotSupported,
-            5 => Self::SecurityError,
-            6 => Self::InsufficientSecurity,
-            7 => Self::WindowSizeOutOfRange,
-            8 => Self::ApplicationExceededReplyTime,
-            9 => Self::OutOfResources,
-            10 => Self::TsmTimeout,
-            11 => Self::ApduTooLong,
-            other => Self::Unknown(other),
-        }
-    }
-}
-
-impl From<AbortReason> for u8 {
-    fn from(reason: AbortReason) -> Self {
-        match reason {
-            AbortReason::Other => 0,
-            AbortReason::BufferOverflow => 1,
-            AbortReason::InvalidApduInThisState => 2,
-            AbortReason::PreemptedByHigherPriorityTask => 3,
-            AbortReason::SegmentationNotSupported => 4,
-            AbortReason::SecurityError => 5,
-            AbortReason::InsufficientSecurity => 6,
-            AbortReason::WindowSizeOutOfRange => 7,
-            AbortReason::ApplicationExceededReplyTime => 8,
-            AbortReason::OutOfResources => 9,
-            AbortReason::TsmTimeout => 10,
-            AbortReason::ApduTooLong => 11,
-            AbortReason::Unknown(code) => code,
-        }
-    }
-}
-
-impl core::fmt::Display for AbortReason {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let name = match self {
-            AbortReason::Other => "other",
-            AbortReason::BufferOverflow => "buffer-overflow",
-            AbortReason::InvalidApduInThisState => "invalid-apdu-in-this-state",
-            AbortReason::PreemptedByHigherPriorityTask => "preempted-by-higher-priority-task",
-            AbortReason::SegmentationNotSupported => "segmentation-not-supported",
-            AbortReason::SecurityError => "security-error",
-            AbortReason::InsufficientSecurity => "insufficient-security",
-            AbortReason::WindowSizeOutOfRange => "window-size-out-of-range",
-            AbortReason::ApplicationExceededReplyTime => "application-exceeded-reply-time",
-            AbortReason::OutOfResources => "out-of-resources",
-            AbortReason::TsmTimeout => "tsm-timeout",
-            AbortReason::ApduTooLong => "apdu-too-long",
-            AbortReason::Unknown(code) => return write!(f, "unknown({code})"),
-        };
-        f.write_str(name)
-    }
-}
+generate_custom_enum!(
+    /// Abort reason codes (ASHRAE 135 `BACnetAbortReason`).
+    ///
+    /// Unrecognized values surface as `Reserved` (codes 12-63, reserved by
+    /// ASHRAE) or `Custom` (codes 64-255, vendor-proprietary) so any abort
+    /// reason round-trips losslessly.
+    AbortReason{
+    Other = 0,
+    BufferOverflow = 1,
+    InvalidApduInThisState = 2,
+    PreemptedByHigherPriorityTask = 3,
+    SegmentationNotSupported = 4,
+    SecurityError = 5,
+    InsufficientSecurity = 6,
+    WindowSizeOutOfRange = 7,
+    ApplicationExceededReplyTime = 8,
+    OutOfResources = 9,
+    TsmTimeout = 10,
+    ApduTooLong = 11,
+}, u8, 64..=255);
 
 use crate::encoding::{
     decode_context_enumerated, decode_context_object_id, decode_context_tag,
