@@ -63,16 +63,6 @@ no-std = []
 
 # Basic examples
 [[example]]
-name = "simple_device"
-path = "examples/basic/simple_device.rs"
-required-features = ["std"]
-
-[[example]]
-name = "advanced_device"
-path = "examples/basic/advanced_device.rs"
-required-features = ["std"]
-
-[[example]]
 name = "responder_device"
 path = "examples/basic/responder_device.rs"
 required-features = ["std"]
@@ -86,21 +76,6 @@ required-features = ["std"]
 [[example]]
 name = "routed_device_discovery"
 path = "examples/networking/routed_device_discovery.rs"
-required-features = ["std"]
-
-[[example]]
-name = "comprehensive_whois_scan"
-path = "examples/networking/comprehensive_whois_scan.rs"
-required-features = ["std"]
-
-[[example]]
-name = "transport_demo"
-path = "examples/networking/transport_demo.rs"
-required-features = ["std"]
-
-[[example]]
-name = "timeout_demo"
-path = "examples/networking/timeout_demo.rs"
 required-features = ["std"]
 
 # Object examples
@@ -120,6 +95,11 @@ name = "test_client"
 path = "examples/communication/test_client.rs"
 required-features = ["std"]
 
+[[example]]
+name = "read_write_property"
+path = "examples/communication/read_write_property.rs"
+required-features = ["std"]
+
 # Utility examples
 [[example]]
 name = "util_demo"
@@ -129,17 +109,6 @@ required-features = ["std"]
 [[example]]
 name = "vendor_lookup"
 path = "examples/utilities/vendor_lookup.rs"
-required-features = ["std"]
-
-# Debugging examples
-[[example]]
-name = "debug_properties"
-path = "examples/debugging/debug_properties.rs"
-required-features = ["std"]
-
-[[example]]
-name = "debug_formatter"
-path = "examples/debugging/debug_formatter.rs"
 required-features = ["std"]
 
 [[bench]]

@@ -1304,7 +1304,7 @@ impl ApplicationLayerHandler {
                     Ok(Some(Apdu::Abort {
                         server: true,
                         invoke_id,
-                        abort_reason: AbortReason::Other as u8,
+                        abort_reason: u8::from(AbortReason::Other),
                     }))
                 }
             }

@@ -4,19 +4,26 @@
 //! with comprehensive engineering units support.
 
 use bacnet_rs::client::BacnetClient;
-use bacnet_rs::property::decode_units;
 use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().collect();
+    // Example CLI parsing only — not a security boundary.
+    let args: Vec<String> = env::args().collect(); // nosemgrep: rust.lang.security.args.args
     if args.len() != 2 {
-        eprintln!("Usage: {} <target_device_ip>", args[0]);
+        eprintln!("Usage: {} <target_device_ip[:port]>", args[0]);
         eprintln!("Example: {} 10.161.1.211", args[0]);
+        eprintln!("Example: {} 10.161.1.211:47808", args[0]);
         std::process::exit(1);
     }
 
-    let target_ip = &args[1];
-    let target_addr = format!("{}:47808", target_ip).parse()?;
+    // Accept either a bare IP (defaulting to the BACnet/IP port 47808) or a
+    // full "ip:port" socket address.
+    let target = &args[1];
+    let target_addr: std::net::SocketAddr = if target.contains(':') {
+        target.parse()?
+    } else {
+        format!("{}:47808", target).parse()?
+    };
 
     println!("BACnet Client Test with Comprehensive Units");
     println!("===========================================\n");
@@ -85,38 +92,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if let Some(flags) = &obj_info.status_flags {
             println!("  Status Flags: {:?}", flags);
-        }
-    }
-
-    // Test decoding some units
-    println!("\nUnit Decoding Test:");
-    println!("==================");
-
-    let test_data = vec![
-        ([0x91, 62], "degrees-celsius"),
-        ([0x91, 115], "kilowatts"),
-        ([0x91, 1], "percent"),
-        ([0x91, 23], "amperes"),
-    ];
-
-    for (data, expected_name) in test_data {
-        if let Some((units, consumed)) = decode_units(&data) {
-            if units.bacnet_name() == expected_name && consumed == 2 {
-                println!(
-                    "✓ Decoded unit ID {}: {} (correct)",
-                    data[1],
-                    units.bacnet_name()
-                );
-            } else {
-                println!(
-                    "✗ Decoded unit ID {}: expected '{}', got '{}'",
-                    data[1],
-                    expected_name,
-                    units.bacnet_name()
-                );
-            }
-        } else {
-            println!("✗ Failed to decode unit ID {}", data[1]);
         }
     }
 

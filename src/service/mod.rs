@@ -361,15 +361,26 @@ generate_custom_enum!(
     InvalidDataEncoding = 10,
 }, u8, 64..=255);
 
-/// Abort reason codes
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AbortReason {
+generate_custom_enum!(
+    /// Abort reason codes (ASHRAE 135 `BACnetAbortReason`).
+    ///
+    /// Unrecognized values surface as `Reserved` (codes 12-63, reserved by
+    /// ASHRAE) or `Custom` (codes 64-255, vendor-proprietary) so any abort
+    /// reason round-trips losslessly.
+    AbortReason{
     Other = 0,
     BufferOverflow = 1,
     InvalidApduInThisState = 2,
     PreemptedByHigherPriorityTask = 3,
     SegmentationNotSupported = 4,
-}
+    SecurityError = 5,
+    InsufficientSecurity = 6,
+    WindowSizeOutOfRange = 7,
+    ApplicationExceededReplyTime = 8,
+    OutOfResources = 9,
+    TsmTimeout = 10,
+    ApduTooLong = 11,
+}, u8, 64..=255);
 
 use crate::encoding::{
     decode_context_enumerated, decode_context_object_id, decode_context_tag,

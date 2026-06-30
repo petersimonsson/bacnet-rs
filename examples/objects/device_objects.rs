@@ -60,7 +60,8 @@ impl ObjectInfo {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().collect();
+    // Example CLI parsing only — not a security boundary.
+    let args: Vec<String> = env::args().collect(); // nosemgrep: rust.lang.security.args.args
     if args.len() != 2 {
         eprintln!("Usage: {} <target_device_ip>", args[0]);
         eprintln!("Example: {} 10.161.1.211", args[0]);

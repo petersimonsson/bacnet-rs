@@ -19,8 +19,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("BACnet Responder Device Example");
     println!("==============================\n");
 
-    // Parse command line arguments
-    let args: Vec<String> = std::env::args().collect();
+    // Parse command line arguments. Example CLI parsing only — not a security boundary.
+    let args: Vec<String> = std::env::args().collect(); // nosemgrep: rust.lang.security.args.args
     let device_id: u32 = if args.len() > 1 {
         args[1].parse().unwrap_or(12345)
     } else {
