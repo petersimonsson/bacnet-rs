@@ -177,7 +177,7 @@ pub enum Apdu {
     Abort {
         server: bool,
         invoke_id: u8,
-        abort_reason: u8,
+        abort_reason: AbortReason,
     },
 }
 
@@ -435,7 +435,7 @@ impl Apdu {
                 // Invoke ID
                 buffer.push(*invoke_id);
                 // Abort reason
-                buffer.push(*abort_reason);
+                buffer.push(u8::from(*abort_reason));
             }
         }
 
@@ -728,7 +728,7 @@ impl Apdu {
                 Ok(Apdu::Abort {
                     server,
                     invoke_id,
-                    abort_reason,
+                    abort_reason: abort_reason.into(),
                 })
             }
         }
@@ -1304,7 +1304,7 @@ impl ApplicationLayerHandler {
                     Ok(Some(Apdu::Abort {
                         server: true,
                         invoke_id,
-                        abort_reason: u8::from(AbortReason::Other),
+                        abort_reason: AbortReason::Other,
                     }))
                 }
             }
@@ -1389,7 +1389,7 @@ impl ApplicationLayerHandler {
         &mut self,
         _server: bool,
         invoke_id: u8,
-        abort_reason: u8,
+        abort_reason: AbortReason,
     ) -> Result<Option<Apdu>> {
         self.stats.aborts += 1;
         self.transaction_manager
@@ -1501,7 +1501,7 @@ impl TransactionManager {
     }
 
     /// Mark transaction as aborted
-    pub fn abort_transaction(&mut self, invoke_id: u8, _abort_reason: u8) {
+    pub fn abort_transaction(&mut self, invoke_id: u8, _abort_reason: AbortReason) {
         if let Some(transaction) = self
             .transactions
             .iter_mut()
