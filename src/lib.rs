@@ -128,6 +128,7 @@ pub mod vendor;
 #[cfg(feature = "std")]
 pub mod client;
 
+pub mod character_string;
 /// Property value decoders for various BACnet data types
 pub mod property;
 
