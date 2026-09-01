@@ -1108,11 +1108,12 @@ fn extract_character_string(data: &[u8]) -> Option<(String, usize)> {
             if string_data.len() % 2 != 0 {
                 return None; // UTF-16 must have even number of bytes
             }
-            let mut utf16_chars = Vec::new();
-            for chunk in string_data.chunks_exact(2) {
-                let char_code = u16::from_be_bytes([chunk[0], chunk[1]]);
-                utf16_chars.push(char_code);
-            }
+            let utf16_chars: Vec<u16> = string_data
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|chunk| u16::from_be_bytes(*chunk))
+                .collect();
             String::from_utf16_lossy(&utf16_chars)
         }
         _ => {

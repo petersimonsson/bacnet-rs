@@ -2,6 +2,64 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2026-09-01
+
+This release adds **COV notification** support and **router discovery**, consolidates the BVLL header implementation,
+fixes the Who-Is broadcast framing, and restores the **no-std build**.
+
+### Added
+
+- **COV notifications** (#70, thanks @petersimonsson): full encoding *and*
+  decoding for COV notification and subscription services:
+  - `CovNotificationRequest::decode` and a new `CovNotificationProperty` type modelling `BACnetPropertyValue`, including
+    the optional
+    `propertyArrayIndex` and `priority` fields
+  - `encode_context_boolean` / `decode_context_boolean` in `encoding`
+  - `ConfirmedServiceChoice::ConfirmedCOVNotification` (service choice 1)
+- **Router discovery and routed client requests** (#66): the client now sends Who-Is-Router-To-Network, collects
+  `DiscoveredRouter` answers, learns each device's route from routed I-Am responses (`DeviceInfo::route`), and addresses
+  confirmed requests through the right router via `BacnetTarget`
+- `Ord`/`PartialOrd` for `ObjectIdentifier` and all `generate_custom_enum!`
+  types, so they can be used as `BTreeMap`/`BTreeSet` keys (#72, thanks @petersimonsson)
+
+### Changed
+
+- `Apdu::Abort` now carries a typed `AbortReason` instead of a raw `u8` (#67, thanks @petersimonsson)
+- **Breaking:** `SubscribeCovRequest::with_lifetime` takes an
+  `issue_confirmed_notifications` parameter, and
+  `CovNotificationRequest.list_of_values: Vec<PropertyValue>` was replaced by
+  `properties: Vec<CovNotificationProperty>` (#70)
+
+### Fixed
+
+- `who_is`/`who_is_to` now send Who-Is as a global-broadcast NPDU (DNET
+  `0xFFFF`, hop count 255) inside an Original-Broadcast-NPDU BVLC when the target is a broadcast address, matching YABE
+  and the reference bacnet-stack; unicast targets get a plain local NPDU inside Original-Unicast-NPDU instead of the
+  previous broadcast-BVLC/local-NPDU mix (#58)
+- `BvlcFunction` in `datalink::bip` now matches ASHRAE 135 Annex J:
+  `SecureBvll` moved from `0x0D` to its standard code `0x0C`, the nonstandard
+  `ForwardedNpduFromDevice` variant was removed, and the missing `Result`
+  (`0x00`) and `WriteBroadcastDistributionTable` (`0x01`) functions were added
+- `SubscribeCovRequest::encode` used hand-rolled tag bytes that truncated the process identifier and lifetime to one
+  byte (a 3600 s lifetime went out as 16 s) and mis-declared the boolean's tag length; it now uses the proper context
+  encodings (#70)
+- The no-std build (`cargo build --no-default-features`) compiles again — it had ~200 accumulated errors: missing
+  `alloc` imports (`Vec`, `String`,
+  `Box`, `vec!`, `format!`, `ToString`) across 18 modules, `std::` paths in code shared with no-std (now `core::`), the
+  `generate_custom_enum!` macro emitting `std::fmt` impls, the std-only `util::statistics` module (uses
+  `Instant`/`Arc`/`Mutex`) not being feature-gated, and `f64::powi`/`f64::log2`
+  (std-only) used in retry backoff and frame-entropy calculations
+- New `clippy::chunks_exact_to_as_chunks` lint (Rust 1.98) failing CI:
+  UTF-16 and network-list decoding now use `as_chunks::<2>()`
+
+### Removed
+
+- Removed the duplicate `BvllHeader`/`BvllFunction`/`BvllType` types from the
+  `transport` module; the transport layer now reuses (and re-exports)
+  `datalink::bip::{BvlcHeader, BvlcFunction}` so there is a single BVLL header implementation
+- Removed a redundant local `read_objects_properties` helper from the
+  `device_objects` example in favour of the client method of the same name (#61, thanks @amab8901)
+
 ## [0.3.1] - 2026-06-30
 
 This release introduces a synchronous **client API** (`BacnetClient`),
@@ -49,30 +107,12 @@ security-audit advisory in the dependency tree.
 
 ### Fixed
 
-- `BvlcFunction` in `datalink::bip` now matches ASHRAE 135 Annex J: `SecureBvll`
-  moved from `0x0D` to its standard code `0x0C`, the nonstandard
-  `ForwardedNpduFromDevice` variant was removed, and the missing `Result` (`0x00`)
-  and `WriteBroadcastDistributionTable` (`0x01`) functions were added
-- `who_is`/`who_is_to` now send Who-Is as a global-broadcast NPDU (DNET `0xFFFF`, hop count 255) inside an
-  Original-Broadcast-NPDU BVLC when the target is a broadcast address, matching YABE and the reference bacnet-stack;
-  unicast targets get a plain local NPDU inside Original-Unicast-NPDU instead of the previous broadcast-BVLC/local-NPDU
-  mix (#58)
 - Socket receive loops now treat both `WouldBlock` and `TimedOut` as timeouts,
   fixing a cross-platform timeout bug on Windows (`WSAETIMEDOUT`)
-- The no-std build (`cargo build --no-default-features`) compiles again — it had
-  ~200 accumulated errors: missing `alloc` imports (`Vec`, `String`, `Box`,
-  `vec!`, `format!`, `ToString`) across 18 modules, `std::` paths in code shared with no-std (now `core::`), the
-  `generate_custom_enum!` macro emitting
-  `std::fmt` impls, the std-only `util::statistics` module (uses
-  `Instant`/`Arc`/`Mutex`) not being feature-gated, and `f64::powi`/`f64::log2`
-  (std-only) used in retry backoff and frame-entropy calculations
 - Clippy warnings resolved; conditional logic refactored to `if let` guards
 
 ### Removed
 
-- Removed the duplicate `BvllHeader`/`BvllFunction`/`BvllType` types from the
-  `transport` module; the transport layer now reuses (and re-exports)
-  `datalink::bip::{BvlcHeader, BvlcFunction}` so there is a single BVLL header implementation
 - Removed the unused optional `env_logger` dependency, which transitively pulled in
   the unmaintained `proc-macro-error2` crate (RUSTSEC-2026-0173) via `jiff` → `defmt`
 - Removed the `advanced_device`, `comprehensive_whois_scan`, `debug_formatter`, and
