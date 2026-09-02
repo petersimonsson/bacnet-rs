@@ -1104,11 +1104,11 @@ pub mod debug {
             }
             4 => {
                 // UCS-2 (UTF-16)
+                // `as_chunks` needs Rust 1.88; MSRV is 1.75
+                #[allow(clippy::chunks_exact_to_as_chunks)]
                 let utf16_chars: Vec<u16> = string_data
-                    .as_chunks::<2>()
-                    .0
-                    .iter()
-                    .map(|chunk| u16::from_be_bytes(*chunk))
+                    .chunks_exact(2)
+                    .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
                     .collect();
                 String::from_utf16_lossy(&utf16_chars)
             }
