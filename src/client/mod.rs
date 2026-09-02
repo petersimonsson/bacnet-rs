@@ -1001,11 +1001,11 @@ impl BacnetClient {
         if bytes.len() % 2 != 0 {
             return None;
         }
-        // `as_chunks` needs Rust 1.88; MSRV is 1.75
-        #[allow(clippy::chunks_exact_to_as_chunks)]
         let mut networks: Vec<u16> = bytes
-            .chunks_exact(2)
-            .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_be_bytes(*pair))
             .collect();
         networks.sort_unstable();
         networks.dedup();

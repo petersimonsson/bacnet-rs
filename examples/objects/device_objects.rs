@@ -1108,11 +1108,11 @@ fn extract_character_string(data: &[u8]) -> Option<(String, usize)> {
             if string_data.len() % 2 != 0 {
                 return None; // UTF-16 must have even number of bytes
             }
-            // `as_chunks` needs Rust 1.88; MSRV is 1.75
-            #[allow(clippy::chunks_exact_to_as_chunks)]
             let utf16_chars: Vec<u16> = string_data
-                .chunks_exact(2)
-                .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|chunk| u16::from_be_bytes(*chunk))
                 .collect();
             String::from_utf16_lossy(&utf16_chars)
         }

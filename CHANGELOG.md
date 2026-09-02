@@ -21,8 +21,8 @@ fixes the Who-Is broadcast framing, and restores the **no-std build**.
   confirmed requests through the right router via `BacnetTarget`
 - `Ord`/`PartialOrd` for `ObjectIdentifier` and all `generate_custom_enum!`
   types, so they can be used as `BTreeMap`/`BTreeSet` keys (#72, thanks @petersimonsson)
-- `rust-version = "1.75"` declared in `Cargo.toml`, making the MSRV that CI already enforced official and visible to
-  cargo
+- `rust-version = "1.88"` declared in `Cargo.toml`, making the MSRV official and visible to cargo; the CI MSRV check
+  moved from 1.75 to 1.88 accordingly
 
 ### Changed
 
@@ -51,8 +51,8 @@ fixes the Who-Is broadcast framing, and restores the **no-std build**.
   `generate_custom_enum!` macro emitting `std::fmt` impls, the std-only `util::statistics` module (uses
   `Instant`/`Arc`/`Mutex`) not being feature-gated, and `f64::powi`/`f64::log2`
   (std-only) used in retry backoff and frame-entropy calculations
-- New `clippy::chunks_exact_to_as_chunks` lint (Rust 1.98) failing CI: allowed at the three affected sites, since the
-  suggested `as_chunks` needs Rust 1.88 and the MSRV check runs on 1.75
+- New `clippy::chunks_exact_to_as_chunks` lint (Rust 1.98) failing CI: UTF-16 and network-list decoding now use
+  `as_chunks::<2>()` (needs Rust 1.88, hence the MSRV bump)
 
 ### Removed
 
