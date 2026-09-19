@@ -120,6 +120,7 @@ jobs:
         features:
           - "" # default features
           - "--no-default-features --features std"
+          - "--no-default-features --features no-std"
           - "--all-features"
 
     steps:
